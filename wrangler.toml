@@ -1,0 +1,51 @@
+name = "food-loss-backend"
+main = "src/index.ts"
+compatibility_date = "2025-06-01"
+compatibility_flags = ["nodejs_compat"]
+
+# GUI(src/ui/app.html)を文字列としてバンドルに取り込むための設定
+rules = [{ type = "Text", globs = ["**/*.html"], fallthrough = true }]
+
+# ----------------------------------------------------------------------------
+# 環境変数（シークレットではない値のみ）
+#   GEMINI_API_KEY はここに書かず、`wrangler secret put GEMINI_API_KEY`
+#   （ローカルは .dev.vars）で管理する。
+# ----------------------------------------------------------------------------
+[vars]
+# 画像認識・レシピ提案で使うモデル。
+# ※ `gemini-3-flash` という名前は v1beta では提供されておらず404になるため、
+#    実際に呼べる `gemini-3-flash-preview` を指定している。
+#    無料枠のレート制限に当たる場合は gemini-3.1-flash-lite に切り替える。
+GEMINI_MODEL = "gemini-3-flash-preview"
+# 画像取得URLの署名鍵（開発用の既定値）。
+# 本番では `wrangler secret put PHOTO_URL_SECRET` で上書きすること。
+PHOTO_URL_SECRET = "dev-only-photo-url-secret"
+
+# ----------------------------------------------------------------------------
+# D1（構造化データ）
+#   `wrangler d1 create food-loss-db` の出力の database_id をここに貼る。
+# ----------------------------------------------------------------------------
+[[d1_databases]]
+binding = "DB"
+database_name = "food-loss-db"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+# ----------------------------------------------------------------------------
+# R2（画像本体）
+#   `wrangler r2 bucket create food-loss-photos` で作成する。
+# ----------------------------------------------------------------------------
+[[r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "food-loss-photos"
+preview_bucket_name = "food-loss-photos-preview"
+
+# ポートを固定する。
+# 指定しないと、前回のプロセスがポートを掴んだままの時に別ポート(8788など)へ
+# 黙って移動してしまい、「ブラウザは8787を見ているのにサーバーは8788」という
+# 分かりにくい状態になるため。
+[dev]
+port = 8787
+
+[observability]
+enabled = true

@@ -1,0 +1,8 @@
+# このファイルをコピーして .dev.vars を作成し、実際のキーを入れてください。
+#   cp .dev.vars.example .dev.vars
+# .dev.vars は .gitignore 済みです。本番は `wrangler secret put GEMINI_API_KEY` を使います。
+
+GEMINI_API_KEY="your-gemini-api-key-here"
+
+# 任意: モデルを上書きしたい場合（未指定なら wrangler.toml の GEMINI_MODEL）
+# GEMINI_MODEL="gemini-3.1-flash-lite"

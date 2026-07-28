@@ -1,0 +1,1622 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mogu — 食材を、おいしく使いきる</title>
+<style>
+/* =========================================================================
+   デザインは front/app/globals.css を移植（Tailwind依存は外して素のCSSに）。
+   末尾に、このアプリ固有の機能（食品ロス集計・認識候補・カメラ等）用の
+   スタイルを追加している。
+   ========================================================================= */
+:root {
+  --ink: #172018;
+  --muted: #6f786f;
+  --cream: #f7f5ee;
+  --paper: #fffefa;
+  --leaf: #2f6f49;
+  --lime: #b8ed78;
+  --lime-soft: #e4f7cb;
+  --orange: #f06f43;
+  --line: #dfe3da;
+}
+
+* { box-sizing: border-box; }
+
+/* display を指定したクラスに hidden 属性が負けないようにする */
+[hidden] { display: none !important; }
+
+html { background: var(--cream); scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 4% 10%, rgba(184, 237, 120, 0.19), transparent 22rem),
+    var(--cream);
+  font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", sans-serif;
+}
+
+button, input, select { font: inherit; }
+button, a { -webkit-tap-highlight-color: transparent; }
+button { color: inherit; }
+
+.app-shell { min-height: 100vh; padding-bottom: 9rem; }
+
+.topbar {
+  max-width: 1180px; height: 84px; margin: auto; padding: 0 28px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+
+.brand {
+  color: var(--ink); text-decoration: none;
+  display: flex; align-items: center; gap: 10px;
+  font: 800 25px/1 Georgia, serif; letter-spacing: -0.8px;
+}
+
+.brand-mark {
+  width: 38px; height: 38px; display: grid; place-items: center;
+  color: white; background: var(--leaf); border-radius: 12px 12px 12px 3px;
+  font: italic 700 24px/1 Georgia, serif;
+}
+
+.top-actions { display: flex; gap: 12px; align-items: center; }
+
+.icon-button {
+  border: 1px solid var(--line); background: var(--paper);
+  border-radius: 50%; width: 43px; height: 43px; cursor: pointer;
+}
+
+.notification-button { position: relative; font-size: 22px; }
+
+.notification-button > span {
+  position: absolute; top: -4px; right: -3px;
+  min-width: 19px; height: 19px; padding: 0 5px;
+  display: grid; place-items: center;
+  background: var(--orange); color: white;
+  border-radius: 20px; border: 2px solid var(--cream);
+  font: 800 10px/1 sans-serif;
+}
+
+.account-chip {
+  min-height: 48px; padding: 6px 8px 6px 7px;
+  border: 1px solid var(--line); border-radius: 16px;
+  display: flex; align-items: center; gap: 9px;
+  background: rgba(255, 254, 250, 0.82);
+}
+
+.account-chip > span {
+  width: 34px; height: 34px; display: grid; place-items: center;
+  border-radius: 10px; background: var(--lime); font-weight: 800;
+}
+
+.account-chip div { display: grid; }
+
+.account-chip strong {
+  max-width: 120px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-size: 12px;
+}
+
+.account-chip small { color: var(--muted); font-size: 10px; }
+
+.account-chip button {
+  margin-left: 5px; padding: 7px; border: 0; background: transparent;
+  color: var(--muted); font-size: 10px; cursor: pointer;
+}
+
+.story-section, .inventory-section, .waste-alert, .stats-section {
+  max-width: 1124px; margin-left: auto; margin-right: auto;
+}
+
+.story-section {
+  background: rgba(255, 254, 250, 0.84);
+  border: 1px solid rgba(221, 225, 216, 0.8);
+  border-radius: 30px; padding: 30px 32px 27px;
+  box-shadow: 0 18px 60px rgba(45, 62, 47, 0.06);
+}
+
+.section-heading, .inventory-title-row {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 24px;
+}
+
+.eyebrow {
+  display: block; color: var(--leaf);
+  font: 800 10px/1.2 Arial, sans-serif; letter-spacing: 0.17em;
+}
+
+.section-heading h1, .inventory-title-row h2, .stats-title-row h2 {
+  margin: 7px 0 0;
+  font: 700 clamp(27px, 3.6vw, 40px)/1.1 Georgia, "Yu Mincho", serif;
+  letter-spacing: -1px;
+}
+
+.section-heading > p { margin: 0 0 4px; color: var(--muted); font-size: 12px; }
+
+.story-row {
+  margin-top: 24px; display: flex; gap: 25px;
+  overflow-x: auto; padding: 2px 4px 5px; scrollbar-width: none;
+}
+
+.story-row::-webkit-scrollbar { display: none; }
+
+.story {
+  flex: 0 0 82px; width: 82px; padding: 0; border: 0; background: none;
+  cursor: pointer; display: grid; justify-items: center; gap: 4px;
+}
+
+.story-ring {
+  --progress: 70%;
+  width: 75px; height: 75px; padding: 4px; border-radius: 50%;
+  background: conic-gradient(var(--leaf) var(--progress), #e1e5dc 0);
+  transform: rotate(-90deg); transition: transform 0.2s ease;
+}
+
+.story:hover .story-ring { transform: rotate(-90deg) scale(1.04); }
+.story-ring.urgent { background: conic-gradient(var(--orange) var(--progress), #f0dfd8 0); }
+
+.story-image {
+  width: 100%; height: 100%; border: 3px solid var(--paper);
+  border-radius: 50%; overflow: hidden; background: var(--lime-soft);
+  transform: rotate(90deg); display: grid; place-items: center; font-size: 32px;
+}
+
+.story-image img { width: 100%; height: 100%; object-fit: cover; }
+.story strong { margin-top: 3px; font-size: 12px; }
+.story small { color: var(--muted); font-size: 10px; }
+
+.add-story-circle {
+  width: 75px; height: 75px; border: 2px dashed #9eaa9d; border-radius: 50%;
+  display: grid; place-items: center; color: var(--leaf);
+  background: #f7faf3; font-size: 28px;
+}
+
+.waste-alert {
+  margin-top: 18px; min-height: 86px; padding: 16px 20px;
+  display: flex; align-items: center; gap: 16px;
+  background: #fff4ed; border: 1px solid #f5d9ca; border-radius: 22px;
+}
+
+.alert-icon {
+  width: 42px; height: 42px; display: grid; place-items: center;
+  border-radius: 50%; color: white; background: var(--orange);
+  font: 800 20px/1 Georgia, serif;
+}
+
+.waste-alert div { flex: 1; }
+.waste-alert strong { font-size: 14px; }
+.waste-alert p { margin: 4px 0 0; color: #7c5b4f; font-size: 12px; }
+
+.waste-alert button {
+  border: 0; color: #9d4526; background: transparent;
+  cursor: pointer; font-weight: 800;
+}
+
+.story-recipe-action { max-width: 1124px; margin: 14px auto 0; }
+
+.story-recipe-action button {
+  width: 100%; min-height: 68px; padding: 12px 18px;
+  display: flex; align-items: center; gap: 14px;
+  border: 1px solid #cfddca; border-radius: 20px;
+  color: var(--ink); background: var(--lime-soft);
+  cursor: pointer; text-align: left;
+}
+
+.story-recipe-action button > span {
+  width: 42px; height: 42px; display: grid; place-items: center;
+  border-radius: 13px; color: white; background: var(--leaf); font-size: 21px;
+}
+
+.story-recipe-action button > div { flex: 1; display: grid; gap: 3px; }
+.story-recipe-action strong { font-size: 14px; }
+.story-recipe-action small { color: var(--muted); font-size: 11px; }
+.story-recipe-action b { color: var(--leaf); font-size: 20px; }
+
+.inventory-section { padding-top: 46px; }
+
+.search-box {
+  width: min(320px, 42vw); height: 46px; padding: 0 15px;
+  display: flex; align-items: center; gap: 9px;
+  border: 1px solid var(--line); border-radius: 15px; background: var(--paper);
+}
+
+.search-box span { font: 26px/1 Georgia, serif; }
+
+.search-box input {
+  width: 100%; border: 0; outline: 0; background: transparent; font-size: 13px;
+}
+
+.category-row {
+  margin: 22px 0; display: flex; gap: 9px; overflow-x: auto; scrollbar-width: none;
+}
+.category-row::-webkit-scrollbar { display: none; }
+
+.category-row button {
+  padding: 10px 14px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--paper); white-space: nowrap; cursor: pointer;
+  font-weight: 700; font-size: 12px;
+}
+
+.category-row button span { margin-right: 5px; }
+
+.category-row button small {
+  margin-left: 6px; padding: 1px 6px; border-radius: 99px;
+  color: var(--muted); background: #edf0e9;
+}
+
+.category-row button.active { color: white; background: var(--leaf); border-color: var(--leaf); }
+.category-row button.active small { background: rgba(255, 255, 255, 0.18); color: white; }
+
+.food-grid, .loading-grid {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 17px;
+}
+
+.food-card {
+  min-width: 0; padding: 9px 9px 13px; border: 1px solid var(--line);
+  border-radius: 23px; background: var(--paper); cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.food-card:hover { transform: translateY(-3px); box-shadow: 0 14px 30px rgba(39, 57, 41, 0.1); }
+
+.food-photo {
+  position: relative; aspect-ratio: 1.18; border-radius: 17px; overflow: hidden;
+  display: grid; place-items: center; font-size: clamp(44px, 6vw, 72px);
+}
+
+.food-photo img, .modal-photo img { width: 100%; height: 100%; object-fit: cover; }
+
+/* カテゴリごとの色（バックエンドの12分類に合わせて拡張） */
+.food-yasai      { background: #dcebd5; }
+.food-kudamono   { background: #f4dbd3; }
+.food-niku       { background: #f0d6cf; }
+.food-gyokai     { background: #d8e6ef; }
+.food-nyuseihin  { background: #e8e4d7; }
+.food-tamago     { background: #f2e5bd; }
+.food-daizu      { background: #e6e3d2; }
+.food-shushoku   { background: #e8d3b9; }
+.food-souzai     { background: #e5dced; }
+.food-chomiryo   { background: #e4e6e4; }
+.food-inryo      { background: #d9eaea; }
+.food-sonota     { background: #deddd4; }
+
+.expiry-pill {
+  position: absolute; left: 10px; top: 10px; padding: 5px 9px;
+  border-radius: 999px; color: var(--leaf); background: rgba(255, 255, 255, 0.9);
+  font-size: 10px; font-weight: 800; backdrop-filter: blur(8px);
+}
+
+.expiry-pill.hot { color: white; background: var(--orange); }
+
+.food-info {
+  min-width: 0; padding: 13px 5px 10px; display: flex;
+  justify-content: space-between; align-items: flex-end; gap: 8px;
+}
+
+.category-label { color: var(--muted); font-size: 9px; }
+
+.food-info h3 {
+  overflow: hidden; margin: 3px 0 0;
+  font: 700 18px/1.15 Georgia, "Yu Mincho", serif;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+
+.food-info > strong { white-space: nowrap; font: 700 21px/1 Georgia, serif; }
+.food-info > strong small { margin-left: 2px; font: 700 10px/1 sans-serif; }
+
+.expiry-track {
+  height: 4px; margin: 0 5px; border-radius: 10px;
+  background: #e6e8e2; overflow: hidden;
+}
+
+.expiry-track span { display: block; height: 100%; border-radius: inherit; background: var(--leaf); }
+
+.empty-state {
+  padding: 60px 20px; text-align: center; border: 1px dashed #c8cec4;
+  border-radius: 24px; background: rgba(255, 254, 250, 0.55);
+}
+
+.empty-state > span { font-size: 38px; }
+.empty-state h3 { margin: 12px 0 5px; }
+.empty-state p { margin: 0 0 18px; color: var(--muted); font-size: 13px; }
+
+.empty-state button {
+  padding: 11px 18px; border: 0; border-radius: 99px;
+  color: white; background: var(--leaf); cursor: pointer; font-weight: 800;
+}
+
+.loading-grid span {
+  height: 285px; border-radius: 23px;
+  background: linear-gradient(90deg, #ecece5, #f7f6ef, #ecece5);
+  background-size: 200% 100%; animation: shimmer 1.2s infinite linear;
+}
+
+@keyframes shimmer { to { background-position: -200% 0; } }
+
+.bottom-dock {
+  position: fixed; z-index: 20; left: 50%; bottom: 20px;
+  transform: translateX(-50%); width: min(550px, calc(100vw - 30px));
+  height: 75px; padding: 8px 20px; display: grid; align-items: center;
+  border: 1px solid rgba(208, 214, 205, 0.8); border-radius: 26px;
+  background: rgba(255, 254, 250, 0.94);
+  box-shadow: 0 14px 42px rgba(28, 44, 31, 0.16); backdrop-filter: blur(14px);
+}
+
+.bottom-dock button {
+  border: 0; color: var(--muted); background: transparent;
+  display: grid; place-items: center; gap: 3px; cursor: pointer; font-size: 9px;
+}
+
+.bottom-dock button > span { font-size: 20px; }
+.bottom-dock .camera-button { position: relative; align-self: end; color: var(--ink); }
+.bottom-dock.single-action { width: 116px; padding: 8px 14px; grid-template-columns: 1fr; }
+
+.camera-button > span {
+  width: 58px; height: 58px; margin-top: -33px; display: grid; place-items: center;
+  border: 5px solid var(--cream); border-radius: 50%; background: var(--lime);
+  box-shadow: 0 5px 0 var(--ink); font-size: 30px !important;
+}
+
+.camera-button small { font-size: 9px; font-weight: 800; }
+
+.modal-backdrop {
+  position: fixed; z-index: 50; inset: 0; padding: 22px;
+  display: grid; place-items: center; background: rgba(13, 20, 14, 0.67);
+  backdrop-filter: blur(8px); animation: fade 0.16s ease-out;
+}
+
+@keyframes fade { from { opacity: 0; } }
+
+.story-modal, .add-modal, .recipe-modal {
+  position: relative; width: min(100%, 510px); max-height: calc(100vh - 44px);
+  overflow: auto; border-radius: 28px; background: var(--paper);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.28);
+}
+
+.modal-close {
+  position: absolute; z-index: 3; top: 14px; right: 14px;
+  width: 36px; height: 36px; border: 0; border-radius: 50%;
+  color: var(--ink); background: rgba(255, 255, 255, 0.86);
+  cursor: pointer; font-size: 24px;
+}
+
+.modal-photo {
+  position: relative; height: min(46vh, 380px); overflow: hidden;
+  display: grid; place-items: center; border-radius: 28px 28px 0 0; font-size: 116px;
+}
+
+.modal-actions { padding: 15px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.modal-actions button {
+  min-height: 48px; border: 1px solid var(--line); border-radius: 14px;
+  background: white; cursor: pointer; font-weight: 800;
+}
+
+.modal-actions .consume-button { border-color: var(--leaf); color: white; background: var(--leaf); }
+.modal-actions .discard-button { border-color: #eab8a6; color: #9d4526; }
+
+.add-modal, .recipe-modal { padding: 30px; }
+
+.add-heading h2, .recipe-modal h2 {
+  margin: 7px 0; font: 700 30px/1.15 Georgia, "Yu Mincho", serif;
+}
+
+.add-heading p, .recipe-lead { margin: 0 0 22px; color: var(--muted); font-size: 13px; }
+
+.photo-drop {
+  position: relative; width: 100%; height: 210px;
+  border: 1.5px dashed #aab4a7; border-radius: 20px;
+  color: var(--leaf); background: #f4f7ef; overflow: hidden; cursor: pointer;
+  display: grid; place-items: center; align-content: center; gap: 7px;
+}
+
+.photo-drop.has-photo { border-style: solid; }
+
+.photo-drop img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+.camera-glyph {
+  width: 48px; height: 48px; display: grid; place-items: center;
+  border-radius: 50%; background: var(--lime-soft); font-size: 24px;
+}
+
+.photo-drop small { color: var(--muted); }
+
+.analyzing {
+  position: absolute; inset: auto 10px 10px; padding: 10px;
+  border-radius: 12px; color: white; background: rgba(19, 28, 20, 0.85);
+  font-size: 12px; font-weight: 800;
+}
+
+.form-message { margin: 10px 0 0; color: var(--leaf); font-size: 11px; font-weight: 700; }
+.form-message.warn { color: var(--orange); }
+
+.form-grid { margin-top: 15px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+.form-grid label {
+  display: grid; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 800;
+}
+
+.form-grid .span-two { grid-column: span 2; }
+
+.form-grid input, .form-grid select {
+  width: 100%; min-height: 45px; padding: 0 12px;
+  border: 1px solid var(--line); border-radius: 12px;
+  color: var(--ink); background: white; outline: 0;
+}
+
+.form-grid input:focus, .form-grid select:focus {
+  border-color: var(--leaf); box-shadow: 0 0 0 3px rgba(47, 111, 73, 0.1);
+}
+
+.primary-submit {
+  width: 100%; min-height: 51px; margin-top: 17px; border: 0; border-radius: 15px;
+  color: white; background: var(--leaf); cursor: pointer; font-weight: 800;
+}
+
+.primary-submit:disabled { opacity: 0.55; cursor: wait; }
+
+.recipe-list { display: grid; gap: 10px; }
+
+.recipe-list article {
+  padding: 14px; display: grid; grid-template-columns: 35px 1fr;
+  align-items: start; gap: 10px; border: 1px solid var(--line); border-radius: 16px;
+}
+
+.recipe-list article > span { color: var(--leaf); font: italic 700 16px/1 Georgia, serif; }
+.recipe-list h3 { margin: 0; font-size: 14px; }
+.recipe-list p { margin: 4px 0 0; color: var(--muted); font-size: 10px; }
+
+.recipe-list ol {
+  margin: 8px 0 0; padding-left: 17px; color: var(--ink);
+  font-size: 12px; line-height: 1.7;
+}
+
+.toast {
+  position: fixed; z-index: 70; left: 50%; bottom: 110px;
+  transform: translateX(-50%); min-width: 280px; max-width: min(92vw, 420px);
+  padding: 13px 14px 13px 17px; display: flex; justify-content: space-between;
+  gap: 12px; border: 0; border-radius: 14px; color: white; background: var(--ink);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.2); cursor: pointer;
+  font-size: 12px; text-align: left;
+}
+
+.toast.error { background: #8f2f1c; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* ---------- 追加分：食品ロス集計・履歴 ---------- */
+
+.stats-section { padding-top: 46px; }
+
+.stats-grid {
+  margin-top: 22px; display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px;
+}
+
+.stat-card {
+  padding: 20px; border: 1px solid var(--line); border-radius: 22px;
+  background: var(--paper); text-align: center;
+}
+
+.stat-card b { display: block; font: 700 30px/1.1 Georgia, serif; }
+.stat-card b.warm { color: var(--orange); }
+.stat-card span { color: var(--muted); font-size: 11px; font-weight: 700; }
+
+.history-list { margin-top: 14px; display: grid; gap: 8px; }
+
+.history-list article {
+  padding: 12px 15px; display: flex; align-items: center; gap: 10px;
+  border: 1px solid var(--line); border-radius: 15px; background: var(--paper);
+}
+
+.history-list strong { font-size: 13px; }
+.history-list small { color: var(--muted); font-size: 10px; }
+.history-list .spacer { flex: 1; }
+
+.event-tag {
+  padding: 3px 9px; border-radius: 999px; font-size: 10px; font-weight: 800;
+  background: var(--lime-soft); color: var(--leaf); white-space: nowrap;
+}
+.event-tag.discarded { background: #fbe3da; color: #9d4526; }
+.event-tag.consumed { background: #dcebd5; color: var(--leaf); }
+.event-tag.adjusted { background: #e9e9e2; color: var(--muted); }
+
+/* ---------- 追加分：認識候補 ---------- */
+
+.cand-card {
+  margin-top: 12px; padding: 14px; border: 1px solid var(--line);
+  border-radius: 18px; background: white;
+}
+
+.cand-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cand-head strong { font: 700 17px/1.2 Georgia, "Yu Mincho", serif; }
+
+.conf-pill {
+  padding: 3px 9px; border-radius: 999px; background: var(--lime-soft);
+  color: var(--leaf); font-size: 10px; font-weight: 800;
+}
+.conf-pill.low { background: #fbe3da; color: #9d4526; }
+
+.cand-actions { margin-top: 12px; display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+
+.cand-actions .add {
+  min-height: 46px; border: 0; border-radius: 13px; color: white;
+  background: var(--leaf); cursor: pointer; font-weight: 800;
+}
+
+.cand-actions .skip {
+  min-height: 46px; padding: 0 16px; border: 1px solid var(--line);
+  border-radius: 13px; background: white; cursor: pointer;
+  color: var(--muted); font-weight: 700;
+}
+
+.cand-done {
+  margin-top: 12px; padding: 14px; border: 1px solid #cfe3c8; border-radius: 18px;
+  background: #f2f8ec; color: var(--leaf); font-weight: 800; font-size: 13px;
+}
+
+/* ---------- 追加分：モード切替タブ・カメラ ---------- */
+
+.mode-tabs { display: flex; gap: 8px; margin-bottom: 18px; }
+
+.mode-tabs button {
+  flex: 1; min-height: 42px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--paper); cursor: pointer; font-weight: 800; font-size: 12px;
+}
+
+.mode-tabs button.active { color: white; background: var(--ink); border-color: var(--ink); }
+
+.photo-buttons { margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.photo-buttons button {
+  min-height: 46px; border: 1px solid var(--line); border-radius: 13px;
+  background: white; cursor: pointer; font-weight: 800; font-size: 12px;
+}
+
+.photo-buttons button.primary { border-color: var(--leaf); color: white; background: var(--leaf); }
+
+#camVideo {
+  width: 100%; max-height: 54vh; border-radius: 18px;
+  background: #000; display: block; object-fit: cover;
+}
+
+.ask-modal { padding: 24px; width: min(100%, 380px); }
+.ask-modal h3 { margin: 0 0 14px; font: 700 19px/1.2 Georgia, "Yu Mincho", serif; }
+
+.ask-modal input {
+  width: 100%; min-height: 46px; padding: 0 12px;
+  border: 1px solid var(--line); border-radius: 12px; background: white; outline: 0;
+}
+
+.ask-actions { margin-top: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.ask-actions button {
+  min-height: 46px; border: 1px solid var(--line); border-radius: 13px;
+  background: white; cursor: pointer; font-weight: 800;
+}
+
+.ask-actions .ok { border-color: var(--leaf); color: white; background: var(--leaf); }
+
+.household-select {
+  min-height: 44px; padding: 0 12px; border: 1px solid var(--line);
+  border-radius: 14px; background: var(--paper); cursor: pointer;
+  font-size: 12px; font-weight: 700; max-width: 190px;
+}
+
+@media (max-width: 900px) {
+  .topbar, .story-section, .inventory-section, .waste-alert,
+  .story-recipe-action, .stats-section {
+    margin-left: 18px; margin-right: 18px;
+  }
+  .food-grid, .loading-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 600px) {
+  .app-shell { padding-bottom: 8rem; }
+  .topbar { height: 72px; margin: 0; padding: 0 16px; }
+  .account-chip div { display: none; }
+  .account-chip { min-height: 43px; border-radius: 50%; padding: 4px; }
+  .household-select { max-width: 120px; }
+  .story-section { margin: 0; padding: 24px 18px; border-left: 0; border-right: 0; border-radius: 0; }
+  .section-heading > p { display: none; }
+  .story-row { margin-right: -18px; gap: 17px; }
+  .waste-alert { margin: 14px 12px 0; align-items: flex-start; }
+  .story-recipe-action { margin: 12px 12px 0; }
+  .waste-alert button { display: none; }
+  .inventory-section { margin: 0; padding: 34px 14px 0; }
+  .stats-section { margin: 0; padding: 34px 14px 0; }
+  .stats-grid { grid-template-columns: 1fr; }
+  .inventory-title-row { align-items: stretch; flex-direction: column; gap: 16px; }
+  .search-box { width: 100%; }
+  .category-row { margin-right: -14px; }
+  .food-grid, .loading-grid { gap: 10px; }
+  .food-card { padding: 7px 7px 11px; border-radius: 19px; }
+  .food-photo { aspect-ratio: 1; border-radius: 14px; }
+  .food-info h3 { font-size: 16px; }
+  .bottom-dock { bottom: 10px; height: 67px; padding: 6px 10px; border-radius: 22px; }
+  .camera-button > span { width: 54px; height: 54px; }
+  .modal-backdrop { padding: 0; align-items: end; }
+  .story-modal, .add-modal, .recipe-modal { width: 100%; max-height: 92vh; border-radius: 28px 28px 0 0; }
+  .add-modal, .recipe-modal { padding: 28px 18px 22px; }
+  .ask-modal { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+</style>
+</head>
+<body>
+
+<main class="app-shell">
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="Mogu ホーム">
+      <span class="brand-mark">m</span>
+      <span>Mogu</span>
+    </a>
+    <div class="top-actions">
+      <button class="icon-button notification-button" id="notifyBtn" aria-label="期限通知">
+        ♢<span id="notifyCount" hidden>0</span>
+      </button>
+      <select class="household-select" id="household" aria-label="家庭を選ぶ"></select>
+      <button class="icon-button" id="newHousehold" title="家庭を作る" aria-label="家庭を作る">＋</button>
+      <div class="account-chip" id="accountChip">
+        <span id="userInitial">U</span>
+        <div>
+          <strong id="userName">ユーザー</strong>
+          <small>ログイン中</small>
+        </div>
+        <button id="switchUser" title="ユーザーを切り替える">切替</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="story-section" aria-labelledby="story-title">
+    <div class="section-heading">
+      <div>
+        <span class="eyebrow">USE THESE FIRST</span>
+        <h1 id="story-title">もうすぐ食べごろ</h1>
+      </div>
+      <p>リングが小さいほど、期限が近い食材です</p>
+    </div>
+    <div class="story-row" id="storyRow"></div>
+  </section>
+
+  <div class="story-recipe-action">
+    <button id="recipeBtn">
+      <span>♨</span>
+      <div>
+        <strong>レシピを見る</strong>
+        <small>期限が近い食材から提案します</small>
+      </div>
+      <b>→</b>
+    </button>
+  </div>
+
+  <aside class="waste-alert" id="wasteAlert" hidden>
+    <span class="alert-icon">!</span>
+    <div>
+      <strong id="wasteTitle"></strong>
+      <p id="wasteBody"></p>
+    </div>
+    <button id="wasteRecipeBtn">レシピを見る →</button>
+  </aside>
+
+  <section class="inventory-section" aria-labelledby="inventory-title">
+    <div class="inventory-title-row">
+      <div>
+        <span class="eyebrow">YOUR INGREDIENTS</span>
+        <h2 id="inventory-title">うちの食材</h2>
+      </div>
+      <label class="search-box">
+        <span>⌕</span>
+        <input type="search" id="search" placeholder="食材を検索">
+      </label>
+    </div>
+    <div class="category-row" id="categoryRow" role="list" aria-label="食材カテゴリ"></div>
+    <div id="inventoryArea"></div>
+  </section>
+
+  <section class="stats-section" aria-labelledby="stats-title">
+    <div class="inventory-title-row stats-title-row">
+      <div>
+        <span class="eyebrow">FOOD LOSS</span>
+        <h2 id="stats-title">使いきれた記録</h2>
+      </div>
+      <p style="margin:0 0 4px;color:var(--muted);font-size:12px">消費と廃棄の履歴から集計しています</p>
+    </div>
+    <div class="stats-grid" id="statsGrid"></div>
+    <div class="history-list" id="historyList"></div>
+  </section>
+
+  <nav class="bottom-dock single-action" aria-label="食材登録">
+    <button class="camera-button" id="dockAdd">
+      <span>＋</span>
+      <small>写真で登録</small>
+    </button>
+  </nav>
+</main>
+
+<div id="modalRoot"></div>
+<div id="toastRoot"></div>
+
+<script>
+/* =========================================================================
+   バックエンドは既存の Hono API をそのまま使う。
+   認証は Authorization: Bearer <token>（初回訪問時に自動生成して保存）。
+   ========================================================================= */
+
+const $ = (id) => document.getElementById(id);
+
+/** バックエンドの12カテゴリ。アイコンと配色クラスを対応付ける。 */
+const CATEGORIES = [
+  { id: '',         label: 'すべて',   icon: '✦',  cls: 'sonota' },
+  { id: '野菜',     label: '野菜',     icon: '🥬', cls: 'yasai' },
+  { id: '果物',     label: '果物',     icon: '🍎', cls: 'kudamono' },
+  { id: '肉',       label: '肉',       icon: '🥩', cls: 'niku' },
+  { id: '魚介',     label: '魚介',     icon: '🐟', cls: 'gyokai' },
+  { id: '乳製品',   label: '乳製品',   icon: '🥛', cls: 'nyuseihin' },
+  { id: '卵',       label: '卵',       icon: '🥚', cls: 'tamago' },
+  { id: '大豆製品', label: '大豆製品', icon: '🫘', cls: 'daizu' },
+  { id: '主食',     label: '主食',     icon: '🍞', cls: 'shushoku' },
+  { id: '惣菜',     label: '惣菜',     icon: '🍱', cls: 'souzai' },
+  { id: '調味料',   label: '調味料',   icon: '🧂', cls: 'chomiryo' },
+  { id: '飲料',     label: '飲料',     icon: '🧃', cls: 'inryo' },
+  { id: 'その他',   label: 'その他',   icon: '🫙', cls: 'sonota' },
+];
+
+const CAT_BY_ID = {};
+CATEGORIES.forEach(function (c) { CAT_BY_ID[c.id] = c; });
+
+const state = {
+  household: null,
+  households: [],
+  items: [],
+  events: [],
+  summary: null,
+  category: '',
+  query: '',
+  loading: true,
+};
+
+/* ---------------------------------------------------------------- 共通 --- */
+
+function token() {
+  let t = localStorage.getItem('token');
+  if (!t) {
+    t = 'user-' + Math.random().toString(36).slice(2, 10);
+    localStorage.setItem('token', t);
+  }
+  return t;
+}
+
+async function api(path, options) {
+  options = options || {};
+  const headers = Object.assign({ Authorization: 'Bearer ' + token() }, options.headers || {});
+  if (options.json !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    options.body = JSON.stringify(options.json);
+  }
+  const res = await fetch(path, { method: options.method || 'GET', headers: headers, body: options.body });
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (e) { data = null; }
+  if (!res.ok) {
+    const msg = (data && data.error && data.error.message) || ('エラー ' + res.status);
+    const detail = data && data.error && data.error.details
+      ? '（' + data.error.details.map(function (d) { return d.path + ': ' + d.message; }).join(' / ') + '）'
+      : '';
+    throw new Error(msg + detail);
+  }
+  return data;
+}
+
+let toastTimer = null;
+function toast(message, isError) {
+  const root = $('toastRoot');
+  root.innerHTML =
+    '<button class="toast' + (isError ? ' error' : '') + '">' + esc(message) + '<span>×</span></button>';
+  root.firstChild.onclick = function () { root.innerHTML = ''; };
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { root.innerHTML = ''; }, 4200);
+}
+
+function esc(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+function offsetDate(days) {
+  const d = new Date();
+  d.setDate(d.getDate() + (days || 0));
+  return d.toISOString().slice(0, 10);
+}
+
+function daysUntil(date) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.ceil((new Date(date + 'T00:00:00').getTime() - today.getTime()) / 86400000);
+}
+
+function expiryLabel(item) {
+  const days = daysUntil(item.expires_on);
+  if (days < 0) return Math.abs(days) + '日超過';
+  if (days === 0) return '今日まで';
+  if (days === 1) return 'あと1日';
+  return 'あと' + days + '日';
+}
+
+/** 購入日（無ければ登録日）から期限までの残り割合。ストーリーのリングに使う。 */
+function ringProgress(item) {
+  const startSource = item.purchased_on || (item.created_at || '').slice(0, 10) || offsetDate(0);
+  const start = new Date(startSource + 'T00:00:00').getTime();
+  const end = new Date(item.expires_on + 'T00:00:00').getTime();
+  const total = Math.max(86400000, end - start);
+  return Math.max(3, Math.min(100, Math.round(((end - Date.now()) / total) * 100)));
+}
+
+function catOf(item) {
+  return CAT_BY_ID[item.category] || CAT_BY_ID['その他'];
+}
+
+/* ------------------------------------------------------------ モーダル --- */
+
+function openModal(html, options) {
+  options = options || {};
+  const root = $('modalRoot');
+  root.innerHTML = '<div class="modal-backdrop">' + html + '</div>';
+  const backdrop = root.firstChild;
+  backdrop.onmousedown = function (e) { if (e.target === backdrop) closeModal(); };
+  const inner = backdrop.firstElementChild;
+  if (inner) inner.onmousedown = function (e) { e.stopPropagation(); };
+  const close = backdrop.querySelector('.modal-close');
+  if (close) close.onclick = closeModal;
+  if (options.onOpen) options.onOpen(backdrop);
+  return backdrop;
+}
+
+function closeModal() {
+  stopCamera();
+  $('modalRoot').innerHTML = '';
+}
+
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') closeModal();
+});
+
+/** prompt() の代わりに使う入力ダイアログ。キャンセル時は null。 */
+function ask(title, defaultValue, type) {
+  return new Promise(function (resolve) {
+    const backdrop = openModal(
+      '<section class="add-modal ask-modal" role="dialog" aria-modal="true">' +
+      '<h3>' + esc(title) + '</h3>' +
+      '<input id="askInput" type="' + (type || 'text') + '" value="' + esc(defaultValue == null ? '' : defaultValue) + '">' +
+      '<div class="ask-actions"><button class="ok" id="askOk">決定</button>' +
+      '<button id="askCancel">キャンセル</button></div></section>'
+    );
+    const input = backdrop.querySelector('#askInput');
+    function done(value) { closeModal(); resolve(value); }
+    backdrop.querySelector('#askOk').onclick = function () { done(input.value); };
+    backdrop.querySelector('#askCancel').onclick = function () { done(null); };
+    backdrop.onmousedown = function (e) { if (e.target === backdrop) done(null); };
+    input.onkeydown = function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); done(input.value); }
+      if (e.key === 'Escape') { e.preventDefault(); done(null); }
+    };
+    input.focus();
+    input.select();
+  });
+}
+
+/* ------------------------------------------------------------ household --- */
+
+async function loadHouseholds() {
+  const data = await api('/households');
+  state.households = data.households;
+
+  const select = $('household');
+  $('userName').textContent = token();
+  $('userInitial').textContent = token().replace(/^user-/, '').slice(0, 1).toUpperCase();
+
+  if (!state.households.length) {
+    select.innerHTML = '<option>（家庭がありません）</option>';
+    state.household = null;
+    state.loading = false;
+    render();
+    toast('右上の ＋ から家庭を作成してください');
+    return;
+  }
+
+  select.innerHTML = state.households
+    .map(function (h) { return '<option value="' + esc(h.id) + '">' + esc(h.name) + '</option>'; })
+    .join('');
+
+  const saved = localStorage.getItem('hid');
+  const found = state.households.some(function (h) { return h.id === saved; });
+  state.household = found ? saved : state.households[0].id;
+  select.value = state.household;
+  localStorage.setItem('hid', state.household);
+
+  await refreshAll();
+}
+
+async function createHousehold() {
+  const name = await ask('家庭の名前を入力してください', '我が家');
+  if (!name || !name.trim()) return;
+  try {
+    const d = await api('/households', { method: 'POST', json: { name: name.trim() } });
+    localStorage.setItem('hid', d.household.id);
+    toast('「' + d.household.name + '」を作成しました');
+    await loadHouseholds();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ------------------------------------------------------------ データ取得 --- */
+
+async function refreshAll() {
+  if (!state.household) return;
+  state.loading = true;
+  render();
+  try {
+    const [inv, ev] = await Promise.all([
+      api('/households/' + state.household + '/inventory?status=active&limit=200'),
+      api('/households/' + state.household + '/events?limit=12'),
+    ]);
+    state.items = inv.items;
+    state.events = ev.events;
+    state.summary = ev.summary;
+    state.lossStats = ev.loss_stats;
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    state.loading = false;
+    render();
+  }
+}
+
+/* ---------------------------------------------------------------- 描画 --- */
+
+function render() {
+  renderStories();
+  renderCategories();
+  renderInventory();
+  renderWasteAlert();
+  renderStats();
+}
+
+function urgentItems() {
+  return state.items.filter(function (i) { return daysUntil(i.expires_on) <= 2; });
+}
+
+function renderStories() {
+  const row = $('storyRow');
+  const sorted = state.items.slice(0, 8);
+  row.innerHTML =
+    sorted.map(function (item) {
+      const urgent = daysUntil(item.expires_on) <= 1 ? ' urgent' : '';
+      return '<button class="story" data-id="' + esc(item.id) + '" aria-label="' +
+        esc(item.display_name + '、' + expiryLabel(item)) + '">' +
+        '<span class="story-ring' + urgent + '" style="--progress:' + ringProgress(item) + '%">' +
+        '<span class="story-image"><span>' + catOf(item).icon + '</span></span></span>' +
+        '<strong>' + esc(item.display_name) + '</strong>' +
+        '<small>' + esc(expiryLabel(item)) + '</small></button>';
+    }).join('') +
+    '<button class="story add-story" id="addStory">' +
+    '<span class="add-story-circle">＋</span>' +
+    '<strong>食材を追加</strong><small>写真から</small></button>';
+
+  row.querySelectorAll('.story[data-id]').forEach(function (b) {
+    b.onclick = function () { openDetail(b.getAttribute('data-id')); };
+  });
+  const add = $('addStory');
+  if (add) add.onclick = openAddModal;
+
+  const urgent = urgentItems();
+  const badge = $('notifyCount');
+  badge.textContent = urgent.length;
+  badge.hidden = urgent.length === 0;
+}
+
+function renderCategories() {
+  const row = $('categoryRow');
+  row.innerHTML = CATEGORIES.map(function (c) {
+    const count = c.id === ''
+      ? '<small>' + state.items.length + '</small>'
+      : '';
+    return '<button data-cat="' + esc(c.id) + '"' +
+      (state.category === c.id ? ' class="active"' : '') + '>' +
+      '<span>' + c.icon + '</span>' + esc(c.label) + count + '</button>';
+  }).join('');
+
+  row.querySelectorAll('[data-cat]').forEach(function (b) {
+    b.onclick = function () {
+      state.category = b.getAttribute('data-cat');
+      renderCategories();
+      renderInventory();
+    };
+  });
+}
+
+function visibleItems() {
+  const q = state.query.trim().toLowerCase();
+  return state.items.filter(function (i) {
+    const matchCat = !state.category || i.category === state.category;
+    const matchQuery = !q || i.display_name.toLowerCase().indexOf(q) >= 0;
+    return matchCat && matchQuery;
+  });
+}
+
+function renderInventory() {
+  const area = $('inventoryArea');
+
+  if (state.loading) {
+    area.innerHTML = '<div class="loading-grid" aria-label="在庫を読み込み中">' +
+      '<span></span><span></span><span></span><span></span></div>';
+    return;
+  }
+
+  const items = visibleItems();
+  if (!items.length) {
+    area.innerHTML =
+      '<div class="empty-state"><span>📷</span>' +
+      '<h3>' + (state.items.length ? 'この条件に合う食材はありません' : 'まだ食材が登録されていません') + '</h3>' +
+      '<p>写真を撮って、最初の食材を登録しましょう。</p>' +
+      '<button id="emptyAdd">食材を登録</button></div>';
+    const btn = $('emptyAdd');
+    if (btn) btn.onclick = openAddModal;
+    return;
+  }
+
+  area.innerHTML = '<div class="food-grid">' + items.map(function (item) {
+    const days = daysUntil(item.expires_on);
+    const cat = catOf(item);
+    return '<article class="food-card" data-id="' + esc(item.id) + '">' +
+      '<div class="food-photo food-' + cat.cls + '"><span>' + cat.icon + '</span>' +
+      '<span class="expiry-pill' + (days <= 1 ? ' hot' : '') + '">' + esc(expiryLabel(item)) + '</span></div>' +
+      '<div class="food-info"><div>' +
+      '<span class="category-label">' + esc(item.category || '未分類') +
+      (item.source === 'scan' ? ' · 📷' : '') + '</span>' +
+      '<h3>' + esc(item.display_name) + '</h3></div>' +
+      '<strong>' + item.quantity + '<small>' + esc(item.unit) + '</small></strong></div>' +
+      '<div class="expiry-track"><span style="width:' + ringProgress(item) + '%"></span></div>' +
+      '</article>';
+  }).join('') + '</div>';
+
+  area.querySelectorAll('.food-card').forEach(function (card) {
+    card.onclick = function () { openDetail(card.getAttribute('data-id')); };
+  });
+}
+
+function renderWasteAlert() {
+  const urgent = urgentItems();
+  const box = $('wasteAlert');
+  if (!urgent.length) { box.hidden = true; return; }
+  box.hidden = false;
+  $('wasteTitle').textContent = urgent.length + '品を先に使いましょう';
+  $('wasteBody').textContent =
+    urgent.map(function (i) { return i.display_name; }).join('・') + 'の期限が近づいています。';
+}
+
+function renderStats() {
+  const grid = $('statsGrid');
+  const s = state.summary;
+  if (!s) { grid.innerHTML = ''; $('historyList').innerHTML = ''; return; }
+
+  const rate = state.lossStats && state.lossStats.consumption_rate;
+  grid.innerHTML =
+    '<div class="stat-card"><b>' + s.consumed.total_quantity + '</b><span>使いきった量</span></div>' +
+    '<div class="stat-card"><b class="warm">' + s.discarded.total_quantity + '</b><span>捨てた量</span></div>' +
+    '<div class="stat-card"><b>' + (rate == null ? '—' : Math.round(rate * 100) + '%') + '</b>' +
+    '<span>使いきれた割合</span></div>';
+
+  const labels = { created: '追加', adjusted: '修正', consumed: '使いきり', discarded: '廃棄' };
+  $('historyList').innerHTML = state.events.length
+    ? state.events.map(function (e) {
+        return '<article><div><strong>' + esc(e.display_name) + '</strong><br>' +
+          '<small>' + e.quantity + esc(e.unit || '') + '・' + esc(e.occurred_at) +
+          '・' + esc(e.actor_display_name) + (e.note ? '・' + esc(e.note) : '') + '</small></div>' +
+          '<div class="spacer"></div>' +
+          '<span class="event-tag ' + esc(e.event_type) + '">' + (labels[e.event_type] || e.event_type) +
+          '</span></article>';
+      }).join('')
+    : '<article><small>まだ記録がありません。</small></article>';
+}
+
+/* ------------------------------------------------------------ 詳細モーダル --- */
+
+function openDetail(id) {
+  const item = state.items.find(function (i) { return i.id === id; });
+  if (!item) return;
+  const cat = catOf(item);
+  const days = daysUntil(item.expires_on);
+
+  openModal(
+    '<section class="story-modal" role="dialog" aria-modal="true" aria-label="' + esc(item.display_name) + 'の詳細">' +
+    '<button class="modal-close" aria-label="閉じる">×</button>' +
+    '<div class="modal-photo food-' + cat.cls + '"><span>' + cat.icon + '</span>' +
+    '<span class="expiry-pill' + (days <= 1 ? ' hot' : '') + '">' + esc(expiryLabel(item)) + '</span></div>' +
+    '<div style="padding:18px 20px 0">' +
+    '<span class="eyebrow">' + esc(item.category || '未分類') + '</span>' +
+    '<h2 style="margin:6px 0 4px;font:700 27px/1.15 Georgia,\'Yu Mincho\',serif">' +
+    esc(item.display_name) + '</h2>' +
+    '<p style="margin:0;color:var(--muted);font-size:12px">' +
+    '残り ' + item.quantity + esc(item.unit) + '・期限 ' + esc(item.expires_on) +
+    (item.purchased_on ? '・購入 ' + esc(item.purchased_on) : '') +
+    (item.source === 'scan' ? '・写真から登録' : '') + '</p></div>' +
+    '<div class="modal-actions">' +
+    '<button class="consume-button" id="dConsume">✓ 食べきった</button>' +
+    '<button class="discard-button" id="dDiscard">捨てる</button>' +
+    '<button id="dPartial">量を指定して消費</button>' +
+    '<button id="dRecipe">この食材でレシピ</button>' +
+    '</div></section>',
+    {
+      onOpen: function (backdrop) {
+        backdrop.querySelector('#dConsume').onclick = function () { changeLot(item, 'consume'); };
+        backdrop.querySelector('#dDiscard').onclick = function () { changeLot(item, 'discard'); };
+        backdrop.querySelector('#dPartial').onclick = function () { changeLot(item, 'consume', true); };
+        backdrop.querySelector('#dRecipe').onclick = openRecipes;
+      },
+    }
+  );
+}
+
+/** 消費・廃棄。askQuantity が true のときだけ数量を尋ねる。 */
+async function changeLot(item, kind, askQuantity) {
+  const label = kind === 'consume' ? '食べきり' : '廃棄';
+  const body = {};
+  if (askQuantity) {
+    const input = await ask(
+      item.display_name + ' を' + label + 'する量（残り ' + item.quantity + item.unit + '）',
+      item.quantity, 'number'
+    );
+    if (input === null) { openDetail(item.id); return; }
+    const q = Number(input);
+    if (!isFinite(q) || q <= 0) { toast('数量が正しくありません', true); return; }
+    body.quantity = q;
+  }
+  try {
+    await api('/inventory/' + item.id + '/' + kind, { method: 'POST', json: body });
+    closeModal();
+    toast(item.display_name + 'を「' + label + '」にしました');
+    await refreshAll();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ------------------------------------------------------------ レシピ --- */
+
+async function openRecipes() {
+  openModal(
+    '<section class="recipe-modal" role="dialog" aria-modal="true">' +
+    '<button class="modal-close" aria-label="閉じる">×</button>' +
+    '<span class="eyebrow">ZERO-WASTE RECIPES</span>' +
+    '<h2>いま作るなら、これ。</h2>' +
+    '<p class="recipe-lead" id="recipeLead">期限が近い食材から考えています…</p>' +
+    '<div class="recipe-list" id="recipeList"></div></section>'
+  );
+
+  try {
+    const d = await api('/households/' + state.household + '/recipes/suggestions');
+    const lead = $('recipeLead');
+    const list = $('recipeList');
+    if (!lead || !list) return; // 閉じられた
+
+    if (!d.recipes.length) {
+      lead.textContent = d.message || '提案できるレシピがありませんでした。';
+      return;
+    }
+    lead.textContent = '期限が近い ' + d.based_on.length + ' 品から、' + d.model_name + ' が提案しました。';
+    list.innerHTML = d.recipes.map(function (r, i) {
+      return '<article><span>0' + (i + 1) + '</span><div>' +
+        '<h3>' + esc(r.title) + '</h3>' +
+        '<p>' + (r.used_ingredients.length ? esc(r.used_ingredients.join('・')) + 'が使えます' : '定番食材で作れます') + '</p>' +
+        '<ol>' + r.steps.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ol>' +
+        '</div></article>';
+    }).join('');
+  } catch (e) {
+    const lead = $('recipeLead');
+    if (lead) lead.textContent = e.message;
+  }
+}
+
+/* ------------------------------------------------------------ 追加モーダル --- */
+
+let addMode = 'photo';
+let pickedFile = null;
+let previewUrl = null;
+
+function openAddModal() {
+  addMode = 'photo';
+  pickedFile = null;
+
+  openModal(
+    '<section class="add-modal" role="dialog" aria-modal="true">' +
+    '<button class="modal-close" aria-label="閉じる">×</button>' +
+    '<div class="add-heading">' +
+    '<span class="eyebrow">ADD INGREDIENT</span>' +
+    '<h2>食材を登録</h2>' +
+    '<p>写真から自動で読み取るか、手入力で追加します。</p></div>' +
+    '<div class="mode-tabs">' +
+    '<button class="active" id="tabPhoto">写真から</button>' +
+    '<button id="tabManual">手入力</button></div>' +
+    '<div id="addBody"></div></section>',
+    { onOpen: function (b) {
+        b.querySelector('#tabPhoto').onclick = function () { switchMode('photo'); };
+        b.querySelector('#tabManual').onclick = function () { switchMode('manual'); };
+        renderPhotoMode();
+      } }
+  );
+}
+
+function switchMode(mode) {
+  addMode = mode;
+  const photoTab = $('tabPhoto');
+  const manualTab = $('tabManual');
+  if (photoTab) photoTab.className = mode === 'photo' ? 'active' : '';
+  if (manualTab) manualTab.className = mode === 'manual' ? 'active' : '';
+  if (mode === 'photo') renderPhotoMode(); else renderManualMode();
+}
+
+function renderPhotoMode() {
+  const body = $('addBody');
+  if (!body) return;
+  body.innerHTML =
+    '<button type="button" class="photo-drop" id="photoDrop">' +
+    '<span class="camera-glyph">◎</span>' +
+    '<strong>写真を撮る・選ぶ</strong>' +
+    '<small>JPG / PNG · 自動で圧縮して送ります</small></button>' +
+    '<div class="photo-buttons">' +
+    '<button class="primary" id="btnCamera">📷 カメラで撮る</button>' +
+    '<button id="btnFile">ファイルを選ぶ</button></div>' +
+    '<input class="visually-hidden" type="file" id="fileInput" accept="image/*">' +
+    '<input class="visually-hidden" type="file" id="fileCapture" accept="image/*" capture="environment">' +
+    '<p class="form-message" id="scanMessage"></p>' +
+    '<div id="candidates"></div>';
+
+  $('photoDrop').onclick = function () { $('fileInput').click(); };
+  $('btnFile').onclick = function () { $('fileInput').click(); };
+  $('btnCamera').onclick = openCamera;
+  $('fileInput').onchange = function () {
+    if (this.files[0]) startScan(this.files[0]);
+  };
+  $('fileCapture').onchange = function () {
+    if (this.files[0]) startScan(this.files[0]);
+  };
+}
+
+function renderManualMode() {
+  const body = $('addBody');
+  if (!body) return;
+  body.innerHTML =
+    '<form id="manualForm">' +
+    '<div class="form-grid">' +
+    '<label class="span-two">食材名<input id="mName" placeholder="例：トマト" required></label>' +
+    '<label>カテゴリ<select id="mCat">' +
+    CATEGORIES.slice(1).map(function (c) {
+      return '<option value="' + esc(c.id) + '">' + esc(c.label) + '</option>';
+    }).join('') + '</select></label>' +
+    '<label>期限<input type="date" id="mExp" value="' + offsetDate(7) + '" required></label>' +
+    '<label>数量<input type="number" id="mQty" min="0.1" step="0.1" value="1" required></label>' +
+    '<label>単位<input id="mUnit" value="個" required></label>' +
+    '</div>' +
+    '<button class="primary-submit" type="submit">この内容で在庫に追加</button></form>';
+
+  $('manualForm').onsubmit = async function (e) {
+    e.preventDefault();
+    const btn = e.target.querySelector('.primary-submit');
+    btn.disabled = true;
+    try {
+      await api('/households/' + state.household + '/inventory', {
+        method: 'POST',
+        json: {
+          display_name: $('mName').value.trim(),
+          category: $('mCat').value,
+          quantity: Number($('mQty').value),
+          unit: $('mUnit').value.trim(),
+          expires_on: $('mExp').value,
+        },
+      });
+      closeModal();
+      toast($('mName') ? '在庫に登録しました' : '在庫に登録しました');
+      await refreshAll();
+    } catch (err) {
+      toast(err.message, true);
+      btn.disabled = false;
+    }
+  };
+}
+
+/* ------------------------------------------------------------ 写真の準備 --- */
+
+/**
+ * 送信前に画像を縮小する。
+ * スマホの写真は10MBを超えることがあり、そのままだとアップロードに失敗する。
+ * デコードできない形式(HEICなど)はそのまま送り、サーバー側の判定に任せる。
+ */
+async function shrinkImage(file) {
+  const MAX_EDGE = 1600;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+    if (scale === 1 && file.size <= 2 * 1024 * 1024) { bitmap.close(); return file; }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+
+    const blob = await new Promise(function (r) { canvas.toBlob(r, 'image/jpeg', 0.85); });
+    if (!blob) return file;
+    return new File([blob], (file.name || 'photo').replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+  } catch (e) {
+    return file;
+  }
+}
+
+function showPreview(file) {
+  const drop = $('photoDrop');
+  if (!drop) return;
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  previewUrl = URL.createObjectURL(file);
+  drop.className = 'photo-drop has-photo';
+  drop.innerHTML = '<img src="' + previewUrl + '" alt="登録する写真のプレビュー">' +
+    '<span class="analyzing" id="analyzing">食材を見つけています…</span>';
+}
+
+/* ------------------------------------------------------------ 画像認識 --- */
+
+async function startScan(original) {
+  if (!state.household) { toast('先に家庭を作成してください', true); return; }
+
+  pickedFile = original;
+  showPreview(original);
+  const message = $('scanMessage');
+  const candidates = $('candidates');
+  if (candidates) candidates.innerHTML = '';
+  if (message) { message.className = 'form-message'; message.textContent = '画像を準備しています…'; }
+
+  try {
+    const file = await shrinkImage(original);
+    if (message) {
+      message.textContent = file === original
+        ? 'アップロード中…'
+        : 'アップロード中…（' + (original.size / 1048576).toFixed(1) + 'MB → ' +
+          (file.size / 1048576).toFixed(1) + 'MB に圧縮）';
+    }
+
+    const form = new FormData();
+    form.append('file', file);
+    const up = await api('/households/' + state.household + '/photos', { method: 'POST', body: form });
+
+    const job = await api('/photos/' + up.photo.id + '/recognize', { method: 'POST' });
+    const jobId = job.recognition_job.id;
+
+    for (let i = 0; i < 30; i++) {
+      await new Promise(function (r) { setTimeout(r, 1000); });
+      if (!$('candidates')) return; // モーダルが閉じられた
+      const j = await api('/recognition-jobs/' + jobId);
+      const status = j.recognition_job.status;
+
+      if (status === 'completed') {
+        const c = await api('/recognition-jobs/' + jobId + '/candidates');
+        renderCandidates(c.candidates, j.recognition_job.model_name);
+        return;
+      }
+      if (status === 'failed') {
+        setAnalyzing(false);
+        if (message) {
+          message.className = 'form-message warn';
+          message.textContent = '認識に失敗しました: ' + j.recognition_job.error_message;
+        }
+        return;
+      }
+      if (message) message.textContent = '食材を見つけています…（' + (i + 1) + '秒）';
+    }
+    setAnalyzing(false);
+    if (message) { message.className = 'form-message warn'; message.textContent = 'タイムアウトしました。もう一度お試しください。'; }
+  } catch (e) {
+    setAnalyzing(false);
+    if (message) { message.className = 'form-message warn'; message.textContent = e.message; }
+  }
+}
+
+function setAnalyzing(on) {
+  const el = $('analyzing');
+  if (el) el.style.display = on ? '' : 'none';
+}
+
+function renderCandidates(candidates, model) {
+  setAnalyzing(false);
+  const message = $('scanMessage');
+  const area = $('candidates');
+  if (!area) return;
+
+  if (!candidates.length) {
+    if (message) { message.className = 'form-message warn'; message.textContent = '食材を見つけられませんでした。「手入力」から登録できます。'; }
+    return;
+  }
+  if (message) {
+    message.className = 'form-message';
+    message.textContent = model + ' が ' + candidates.length + ' 品を見つけました。内容を確認して追加してください。';
+  }
+
+  area.innerHTML = candidates.map(function (c) {
+    if (c.status === 'accepted') {
+      return '<div class="cand-done">✓ ' + esc(c.corrected_name || c.detected_name) + ' は登録済みです</div>';
+    }
+    const low = c.confidence != null && c.confidence < 0.5;
+    const expiry = c.suggested_expires_on || offsetDate(7);
+    const note = c.expiry_source === 'printed'
+      ? '📅 パッケージの印字から読み取りました'
+      : (c.expiry_source === 'estimated'
+        ? '💡 一般的な日持ちからの目安です。必要なら直してください'
+        : '目安の日付です。確認してください');
+
+    return '<div class="cand-card" data-id="' + esc(c.id) + '">' +
+      '<div class="cand-head"><strong>' + esc(c.corrected_name || c.detected_name) + '</strong>' +
+      '<span class="conf-pill' + (low ? ' low' : '') + '">確信度 ' +
+      (c.confidence != null ? Math.round(c.confidence * 100) + '%' : '不明') +
+      (low ? '・要確認' : '') + '</span></div>' +
+      '<div class="form-grid">' +
+      '<label class="span-two">食材名<input class="c-name" value="' +
+      esc(c.corrected_name || c.detected_name) + '"></label>' +
+      '<label>カテゴリ<select class="c-cat">' +
+      CATEGORIES.slice(1).map(function (x) {
+        return '<option value="' + esc(x.id) + '"' +
+          ((c.suggested_category || 'その他') === x.id ? ' selected' : '') + '>' + esc(x.label) + '</option>';
+      }).join('') + '</select></label>' +
+      '<label>期限<input type="date" class="c-exp" value="' + esc(expiry) + '"></label>' +
+      '<label>数量<input type="number" class="c-qty" min="0.1" step="0.1" value="' +
+      (c.suggested_quantity || 1) + '"></label>' +
+      '<label>単位<input class="c-unit" value="' + esc(c.suggested_unit || '個') + '"></label>' +
+      '</div>' +
+      '<p class="form-message">' + note + '</p>' +
+      '<div class="cand-actions">' +
+      '<button class="add" type="button">在庫に追加</button>' +
+      '<button class="skip" type="button">使わない</button></div></div>';
+  }).join('');
+
+  area.querySelectorAll('.cand-card').forEach(function (card) {
+    const id = card.getAttribute('data-id');
+    card.querySelector('.add').onclick = function () { confirmCandidate(id, card); };
+    card.querySelector('.skip').onclick = function () { rejectCandidate(id, card); };
+  });
+}
+
+async function confirmCandidate(id, card) {
+  const button = card.querySelector('.add');
+  button.disabled = true;
+  try {
+    const d = await api('/recognition-candidates/' + id + '/confirm', {
+      method: 'POST',
+      json: {
+        display_name: card.querySelector('.c-name').value.trim(),
+        category: card.querySelector('.c-cat').value,
+        quantity: Number(card.querySelector('.c-qty').value),
+        unit: card.querySelector('.c-unit').value.trim(),
+        expires_on: card.querySelector('.c-exp').value,
+      },
+    });
+    card.outerHTML = '<div class="cand-done">✓ ' + esc(d.inventory_lot.display_name) + ' を登録しました</div>';
+    toast(d.inventory_lot.display_name + 'を在庫に追加しました');
+    await refreshAll();
+  } catch (e) {
+    button.disabled = false;
+    toast(e.message, true);
+  }
+}
+
+async function rejectCandidate(id, card) {
+  try {
+    await api('/recognition-candidates/' + id, { method: 'PATCH', json: { status: 'rejected' } });
+    card.remove();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ------------------------------------------------------------ カメラ --- */
+
+let camStream = null;
+
+function stopCamera() {
+  if (camStream) {
+    camStream.getTracks().forEach(function (t) { t.stop(); });
+    camStream = null;
+  }
+}
+
+async function openCamera() {
+  const canUse = navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function';
+  if (!canUse) { $('fileCapture').click(); return; }
+
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } },
+      audio: false,
+    });
+  } catch (e) {
+    // 許可されない場合も行き止まりにせず、OSのカメラアプリ/ファイル選択に逃がす
+    if (e && e.name === 'NotAllowedError') toast('カメラを使えないため、写真の選択に切り替えます', true);
+    const capture = $('fileCapture');
+    if (capture) capture.click();
+    return;
+  }
+
+  camStream = stream;
+  const backdrop = openModal(
+    '<section class="add-modal" role="dialog" aria-modal="true" aria-label="食材を撮影">' +
+    '<button class="modal-close" aria-label="閉じる">×</button>' +
+    '<div class="add-heading"><span class="eyebrow">CAMERA</span><h2>食材を撮影</h2></div>' +
+    '<video id="camVideo" playsinline muted autoplay></video>' +
+    '<div class="photo-buttons"><button class="primary" id="camShot">📷 撮影</button>' +
+    '<button id="camCancel">キャンセル</button></div></section>'
+  );
+
+  const video = backdrop.querySelector('#camVideo');
+  video.srcObject = stream;
+  await video.play().catch(function () {});
+
+  backdrop.querySelector('#camCancel').onclick = function () { closeModal(); openAddModal(); };
+  backdrop.querySelector('.modal-close').onclick = function () { closeModal(); openAddModal(); };
+  backdrop.querySelector('#camShot').onclick = async function () {
+    if (!video.videoWidth) { toast('カメラの準備ができていません', true); return; }
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    const blob = await new Promise(function (r) { canvas.toBlob(r, 'image/jpeg', 0.92); });
+    stopCamera();
+    closeModal();
+    openAddModal();
+    if (blob) await startScan(new File([blob], 'camera.jpg', { type: 'image/jpeg' }));
+  };
+}
+
+/* ------------------------------------------------------------ 初期化 --- */
+
+$('household').onchange = function (e) {
+  state.household = e.target.value;
+  localStorage.setItem('hid', state.household);
+  state.category = '';
+  refreshAll();
+};
+
+$('newHousehold').onclick = createHousehold;
+
+$('switchUser').onclick = async function () {
+  const next = await ask('ユーザー名（家族で分けたい時に変更します）', token());
+  if (!next || !next.trim()) return;
+  localStorage.setItem('token', next.trim());
+  localStorage.removeItem('hid');
+  toast(next.trim() + ' として使います');
+  loadHouseholds().catch(function (e) { toast(e.message, true); });
+};
+
+$('search').oninput = function (e) {
+  state.query = e.target.value;
+  renderInventory();
+};
+
+$('recipeBtn').onclick = openRecipes;
+$('wasteRecipeBtn').onclick = openRecipes;
+$('dockAdd').onclick = openAddModal;
+
+$('notifyBtn').onclick = function () {
+  const urgent = urgentItems();
+  if (!urgent.length) { toast('期限が近い食材はありません'); return; }
+  toast(urgent.map(function (i) { return i.display_name + '（' + expiryLabel(i) + '）'; }).join('、'));
+};
+
+render();
+loadHouseholds().catch(function (e) {
+  state.loading = false;
+  render();
+  toast(e.message, true);
+});
+</script>
+</body>
+</html>
