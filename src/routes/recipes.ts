@@ -1,4 +1,4 @@
-import { and, asc, eq, lte } from 'drizzle-orm';
+import { and, asc, eq, inArray, lte } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { inventoryLots } from '../db/schema';
 import { assertHouseholdAccess } from '../lib/access';
@@ -31,6 +31,9 @@ recipesRoute.get('/:id/recipes/suggestions', async (c) => {
   ];
   if (query.within_days !== undefined) {
     conditions.push(lte(inventoryLots.expiresOn, addDays(today, query.within_days)));
+  }
+  if (query.inventory_lot_ids) {
+    conditions.push(inArray(inventoryLots.id, query.inventory_lot_ids));
   }
 
   const lots = await db

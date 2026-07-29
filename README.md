@@ -316,7 +316,8 @@ household配下のリソースには、**そのhouseholdの `active` メンバ�
 | --- | --- | --- |
 | GET | `/households/:id/recipes/suggestions` | 期限が近い在庫を優先したレシピ提案 |
 
-クエリ: `limit`（Geminiに渡す食材数、既定12）、`within_days`（期限で絞る）。
+クエリ: `limit`（Geminiに渡す食材数、既定12）、`within_days`（期限で絞る）、
+`inventory_lot_ids`（画面で選択した在庫IDをカンマ区切りで指定、最大12件）。
 
 ---
 

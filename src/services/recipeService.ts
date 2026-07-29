@@ -47,10 +47,16 @@ export function formatIngredientList(items: RecipeInputItem[]): string {
 
 function buildPrompt(items: RecipeInputItem[]): string {
   return [
-    '以下は家庭の冷蔵庫にある、期限が近い順の食材リストです。',
-    'これらをできるだけ多く使い、食品ロスを減らせる家庭料理レシピを3つ提案してください。',
+    '以下はユーザーが冷蔵庫から選択した、期限が近い順の「候補食材」リストです。',
+    '候補を料理として必要で相性のよい組み合わせに分け、普通の家庭料理レシピを3つ提案してください。',
+    '別の組み合わせの食材を、消費するためだけに同じ料理へ混ぜないでください。',
+    '1つのレシピで使う候補食材は、主役1品と相性のよい補助食材を最大2品まで（合計3品以内）にしてください。',
+    '候補食材を全部使う必要はありません。食材を多く混ぜることを評価せず、味と料理としてのまとまりを優先してください。',
+    '相性の悪い食材は同じ料理に入れず、別のレシピに分けるか使わないでください。使わない候補が残っても構いません。',
+    '3つとも同じ組み合わせにせず、期限が近い食材を優先しながら異なる料理にしてください。',
     '調味料など一般的な家庭にあるものは追加で使って構いませんが、used_ingredients には',
     'リスト内の食材のうち実際に使うものを日本語の名称そのままで入れてください。',
+    '分量は候補に記載された在庫量を超えない、現実的な量を想定してください。',
     'steps は家庭で作れる具体的な手順を3〜8個程度で書いてください。',
     '',
     `食材リスト: ${formatIngredientList(items)}`,
@@ -73,7 +79,7 @@ export async function suggestRecipes(
     env,
     parts: [{ text: buildPrompt(items) }],
     responseSchema: RESPONSE_SCHEMA,
-    temperature: 0.7,
+    temperature: 0.4,
   });
 
   return { recipes: sanitizeRecipes(data), modelName };

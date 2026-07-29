@@ -171,6 +171,13 @@ export const recipeQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(30).default(12),
   /** 何日以内に期限が来る食材に絞るか（未指定なら期限順に上位 limit 件） */
   within_days: z.coerce.number().int().min(0).max(365).optional(),
+  /** UIで選択した在庫ID（カンマ区切り、最大12件） */
+  inventory_lot_ids: z
+    .string()
+    .trim()
+    .transform((value) => value.split(',').map((id) => id.trim()).filter(Boolean))
+    .pipe(z.array(z.string().min(1).max(100)).min(1).max(12))
+    .optional(),
 });
 
 /* -------------------------------------------------------------------------- */

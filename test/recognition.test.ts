@@ -659,7 +659,50 @@ describe('recipes 提案', () => {
     expect(prompt).toContain(`牛乳(期限${dayFromToday(1)}`);
     expect(prompt).toContain(`にんじん(期限${dayFromToday(2)}`);
     expect(prompt.indexOf('牛乳')).toBeLessThan(prompt.indexOf('にんじん'));
+    expect(prompt).toContain('合計3品以内');
+    expect(prompt).toContain('ユーザーが冷蔵庫から選択した');
+    expect(prompt).toContain('相性のよい組み合わせに分け');
+    expect(prompt).toContain('候補食材を全部使う必要はありません');
+    expect(prompt).toContain('相性の悪い食材は同じ料理に入れず');
+    expect(prompt).toContain('3つとも同じ組み合わせにせず');
     expect(geminiCalls[0].body.contents[0].parts).toHaveLength(1);
+    expect(geminiCalls[0].body.generationConfig.temperature).toBe(0.4);
+  });
+
+  it('選択した在庫だけをGeminiに渡す', async () => {
+    const householdId = await createHousehold('recipe-select-user', '選択レシピ家族');
+    const selected = await apiJson(`/households/${householdId}/inventory`, {
+      method: 'POST',
+      body: jsonBody({
+        display_name: 'じゃがいも', quantity: 2, unit: '個', expires_on: dayFromToday(1),
+      }),
+      token: 'recipe-select-user',
+    });
+    await apiJson(`/households/${householdId}/inventory`, {
+      method: 'POST',
+      body: jsonBody({
+        display_name: 'ヨーグルト', quantity: 1, unit: '個', expires_on: dayFromToday(2),
+      }),
+      token: 'recipe-select-user',
+    });
+
+    mockGemini([{
+      title: 'じゃがバター',
+      used_ingredients: ['じゃがいも'],
+      steps: ['じゃがいもを加熱する', 'バターをのせる', '塩で味を整える'],
+    }]);
+
+    const lotId = selected.body.inventory_lot.id;
+    const { status, body } = await apiJson(
+      `/households/${householdId}/recipes/suggestions?inventory_lot_ids=${lotId}`,
+      { token: 'recipe-select-user' },
+    );
+    expect(status).toBe(200);
+    expect(body.based_on).toHaveLength(1);
+    expect(body.based_on[0].display_name).toBe('じゃがいも');
+    const prompt = geminiCalls[0].body.contents[0].parts[0].text as string;
+    expect(prompt).toContain('じゃがいも');
+    expect(prompt).not.toContain('ヨーグルト');
   });
 
   it('在庫が無ければGeminiを呼ばずに空配列を返す', async () => {
