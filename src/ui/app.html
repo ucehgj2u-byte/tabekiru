@@ -469,6 +469,26 @@ button { color: inherit; }
 
 .recipe-list { display: grid; gap: 10px; }
 
+.recipe-picker {
+  margin: 0 0 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.recipe-choice {
+  min-width: 0; padding: 10px 11px; display: flex; align-items: center; gap: 9px;
+  border: 1px solid var(--line); border-radius: 13px; background: white;
+  cursor: pointer; font-size: 12px; font-weight: 700;
+}
+
+.recipe-choice:has(input:checked) {
+  border-color: var(--leaf); background: rgba(47, 111, 73, 0.08);
+}
+
+.recipe-choice input { accent-color: var(--leaf); }
+.recipe-choice span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recipe-choice small { margin-left: auto; color: var(--muted); font-size: 9px; white-space: nowrap; }
+.recipe-generate { margin: 0 0 16px; }
+
 .recipe-list article {
   padding: 14px; display: grid; grid-template-columns: 35px 1fr;
   align-items: start; gap: 10px; border: 1px solid var(--line); border-radius: 16px;
@@ -1176,7 +1196,7 @@ function openDetail(id) {
         backdrop.querySelector('#dConsume').onclick = function () { changeLot(item, 'consume'); };
         backdrop.querySelector('#dDiscard').onclick = function () { changeLot(item, 'discard'); };
         backdrop.querySelector('#dPartial').onclick = function () { changeLot(item, 'consume', true); };
-        backdrop.querySelector('#dRecipe').onclick = openRecipes;
+        backdrop.querySelector('#dRecipe').onclick = function () { openRecipes(item); };
       },
     }
   );
@@ -1206,38 +1226,66 @@ async function changeLot(item, kind, askQuantity) {
 
 /* ------------------------------------------------------------ レシピ --- */
 
-async function openRecipes() {
+function recipePickerHtml(initialItem) {
+  const initialId = initialItem ? initialItem.id : (state.items[0] && state.items[0].id);
+  return state.items.map(function (item) {
+    return '<label class="recipe-choice"><input type="checkbox" name="recipeIngredient" value="' +
+      esc(item.id) + '"' + (item.id === initialId ? ' checked' : '') + '>' +
+      '<span>' + esc(item.display_name) + '</span><small>' + esc(expiryLabel(item)) + '</small></label>';
+  }).join('');
+}
+
+async function openRecipes(initialItem) {
   openModal(
     '<section class="recipe-modal" role="dialog" aria-modal="true">' +
     '<button class="modal-close" aria-label="閉じる">×</button>' +
     '<span class="eyebrow">ZERO-WASTE RECIPES</span>' +
     '<h2>いま作るなら、これ。</h2>' +
-    '<p class="recipe-lead" id="recipeLead">期限が近い食材から考えています…</p>' +
+    '<p class="recipe-lead" id="recipeLead">レシピに使いたい食材を選んでください。</p>' +
+    '<div class="recipe-picker" id="recipePicker">' + recipePickerHtml(initialItem) + '</div>' +
+    '<button class="primary-submit recipe-generate" id="recipeGenerate">選んだ食材でレシピを考える</button>' +
     '<div class="recipe-list" id="recipeList"></div></section>'
   );
 
-  try {
-    const d = await api('/households/' + state.household + '/recipes/suggestions');
+  const generate = $('recipeGenerate');
+  if (!generate) return;
+  generate.onclick = async function () {
+    const selected = Array.from(document.querySelectorAll('input[name="recipeIngredient"]:checked'))
+      .map(function (input) { return input.value; });
     const lead = $('recipeLead');
     const list = $('recipeList');
-    if (!lead || !list) return; // 閉じられた
-
-    if (!d.recipes.length) {
-      lead.textContent = d.message || '提案できるレシピがありませんでした。';
+    if (!selected.length) {
+      if (lead) lead.textContent = '食材を1つ以上選んでください。';
       return;
     }
-    lead.textContent = '期限が近い ' + d.based_on.length + ' 品から、' + d.model_name + ' が提案しました。';
-    list.innerHTML = d.recipes.map(function (r, i) {
-      return '<article><span>0' + (i + 1) + '</span><div>' +
-        '<h3>' + esc(r.title) + '</h3>' +
-        '<p>' + (r.used_ingredients.length ? esc(r.used_ingredients.join('・')) + 'が使えます' : '定番食材で作れます') + '</p>' +
-        '<ol>' + r.steps.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ol>' +
-        '</div></article>';
-    }).join('');
-  } catch (e) {
-    const lead = $('recipeLead');
-    if (lead) lead.textContent = e.message;
-  }
+    if (!lead || !list) return;
+
+    generate.disabled = true;
+    lead.textContent = '選んだ食材から、相性のよい組み合わせを考えています…';
+    list.innerHTML = '';
+
+    try {
+      const query = encodeURIComponent(selected.join(','));
+      const d = await api('/households/' + state.household + '/recipes/suggestions?inventory_lot_ids=' + query);
+
+      if (!d.recipes.length) {
+        lead.textContent = d.message || '提案できるレシピがありませんでした。';
+        return;
+      }
+      lead.textContent = '選んだ ' + d.based_on.length + ' 品から、' + d.model_name + ' が提案しました。';
+      list.innerHTML = d.recipes.map(function (r, i) {
+        return '<article><span>0' + (i + 1) + '</span><div>' +
+          '<h3>' + esc(r.title) + '</h3>' +
+          '<p>' + (r.used_ingredients.length ? esc(r.used_ingredients.join('・')) + 'が使えます' : '定番食材で作れます') + '</p>' +
+          '<ol>' + r.steps.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ol>' +
+          '</div></article>';
+      }).join('');
+    } catch (e) {
+      lead.textContent = e.message;
+    } finally {
+      generate.disabled = false;
+    }
+  };
 }
 
 /* ------------------------------------------------------------ 追加モーダル --- */
