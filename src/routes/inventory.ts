@@ -21,6 +21,7 @@ import {
   getLotOrThrow,
   roundQuantity,
 } from '../services/inventoryService';
+import { createSignedPhotoPath, photoSecret } from '../services/r2Service';
 import type { AppEnv } from '../types';
 
 /** /households にマウント */
@@ -73,13 +74,20 @@ householdInventoryRoute.get('/:id/inventory', async (c) => {
     .limit(query.limit)
     .offset(query.offset);
 
-  const items = rows.map(({ lot, location_name, location_type }) => ({
-    ...lot,
-    location_name,
-    location_type,
-    days_until_expiry: daysUntil(lot.expiresOn, today),
-    is_expired: lot.expiresOn < today,
-  }));
+  // 登録時の写真をカードに表示できるよう、署名付きURLを添えて返す
+  const secret = photoSecret(c.env);
+  const items = await Promise.all(
+    rows.map(async ({ lot, location_name, location_type }) => ({
+      ...lot,
+      location_name,
+      location_type,
+      days_until_expiry: daysUntil(lot.expiresOn, today),
+      is_expired: lot.expiresOn < today,
+      photo_url: lot.photoId
+        ? (await createSignedPhotoPath(lot.photoId, secret)).path
+        : null,
+    })),
+  );
 
   return c.json({ items, count: items.length, today });
 });
@@ -172,6 +180,9 @@ inventoryRoute.get('/:id', async (c) => {
   return c.json({
     inventory_lot: lot,
     days_until_expiry: daysUntil(lot.expiresOn),
+    photo_url: lot.photoId
+      ? (await createSignedPhotoPath(lot.photoId, photoSecret(c.env))).path
+      : null,
   });
 });
 

@@ -365,6 +365,18 @@ button { color: inherit; }
   backdrop-filter: blur(8px); animation: fade 0.16s ease-out;
 }
 
+/* カメラは登録モーダルの上に重ねる（下のモーダルを閉じずに撮影するため） */
+.cam-backdrop { z-index: 60; }
+
+/* 日付入力＋期限カメラボタン */
+.date-row { display: flex; gap: 6px; align-items: center; }
+.date-row input { flex: 1; min-width: 0; }
+.date-cam {
+  flex: 0 0 auto; padding: 8px 10px; border-radius: 12px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--paper); font-size: 15px; line-height: 1;
+}
+.date-cam:hover { background: var(--paper-2, rgba(0,0,0,.04)); }
+
 @keyframes fade { from { opacity: 0; } }
 
 .story-modal, .add-modal, .recipe-modal {
@@ -1075,7 +1087,10 @@ function renderInventory() {
     const days = daysUntil(item.expires_on);
     const cat = catOf(item);
     return '<article class="food-card" data-id="' + esc(item.id) + '">' +
-      '<div class="food-photo food-' + cat.cls + '"><span>' + cat.icon + '</span>' +
+      '<div class="food-photo food-' + cat.cls + '">' +
+      (item.photo_url
+        ? '<img src="' + esc(item.photo_url) + '" alt="' + esc(item.display_name) + 'の登録写真" loading="lazy">'
+        : '<span>' + cat.icon + '</span>') +
       '<span class="expiry-pill' + (days <= 1 ? ' hot' : '') + '">' + esc(expiryLabel(item)) + '</span></div>' +
       '<div class="food-info"><div>' +
       '<span class="category-label">' + esc(item.category || '未分類') +
@@ -1137,7 +1152,10 @@ function openDetail(id) {
   openModal(
     '<section class="story-modal" role="dialog" aria-modal="true" aria-label="' + esc(item.display_name) + 'の詳細">' +
     '<button class="modal-close" aria-label="閉じる">×</button>' +
-    '<div class="modal-photo food-' + cat.cls + '"><span>' + cat.icon + '</span>' +
+    '<div class="modal-photo food-' + cat.cls + '">' +
+    (item.photo_url
+      ? '<img src="' + esc(item.photo_url) + '" alt="' + esc(item.display_name) + 'の登録写真">'
+      : '<span>' + cat.icon + '</span>') +
     '<span class="expiry-pill' + (days <= 1 ? ' hot' : '') + '">' + esc(expiryLabel(item)) + '</span></div>' +
     '<div style="padding:18px 20px 0">' +
     '<span class="eyebrow">' + esc(item.category || '未分類') + '</span>' +
@@ -1266,11 +1284,12 @@ function renderPhotoMode() {
   body.innerHTML =
     '<button type="button" class="photo-drop" id="photoDrop">' +
     '<span class="camera-glyph">◎</span>' +
-    '<strong>写真を撮る・選ぶ</strong>' +
-    '<small>JPG / PNG · 自動で圧縮して送ります</small></button>' +
+    '<strong>食材の写真を撮る・選ぶ</strong>' +
+    '<small>ここで写した写真が在庫カードの画像になります</small></button>' +
     '<div class="photo-buttons">' +
-    '<button class="primary" id="btnCamera">📷 カメラで撮る</button>' +
+    '<button class="primary" id="btnCamera">📷 食材を撮る</button>' +
     '<button id="btnFile">ファイルを選ぶ</button></div>' +
+    '<p class="form-message">賞味期限は、食材を認識したあとに各カードの📅ボタンで撮って読み取れます。</p>' +
     '<input class="visually-hidden" type="file" id="fileInput" accept="image/*">' +
     '<input class="visually-hidden" type="file" id="fileCapture" accept="image/*" capture="environment">' +
     '<p class="form-message" id="scanMessage"></p>' +
@@ -1298,11 +1317,17 @@ function renderManualMode() {
     CATEGORIES.slice(1).map(function (c) {
       return '<option value="' + esc(c.id) + '">' + esc(c.label) + '</option>';
     }).join('') + '</select></label>' +
-    '<label>期限<input type="date" id="mExp" value="' + offsetDate(7) + '" required></label>' +
+    '<label>期限<span class="date-row">' +
+    '<input type="date" id="mExp" value="' + offsetDate(7) + '" required>' +
+    '<button type="button" class="date-cam" id="mExpCam" title="賞味期限を撮って読み取る">📅</button>' +
+    '</span></label>' +
     '<label>数量<input type="number" id="mQty" min="0.1" step="0.1" value="1" required></label>' +
     '<label>単位<input id="mUnit" value="個" required></label>' +
     '</div>' +
+    '<p class="form-message" id="mNote">賞味期限は📅ボタンでパッケージの印字から読み取れます。</p>' +
     '<button class="primary-submit" type="submit">この内容で在庫に追加</button></form>';
+
+  $('mExpCam').onclick = function () { scanExpiryInto($('mExp'), $('mNote')); };
 
   $('manualForm').onsubmit = async function (e) {
     e.preventDefault();
@@ -1469,12 +1494,15 @@ function renderCandidates(candidates, model) {
         return '<option value="' + esc(x.id) + '"' +
           ((c.suggested_category || 'その他') === x.id ? ' selected' : '') + '>' + esc(x.label) + '</option>';
       }).join('') + '</select></label>' +
-      '<label>期限<input type="date" class="c-exp" value="' + esc(expiry) + '"></label>' +
+      '<label>期限<span class="date-row">' +
+      '<input type="date" class="c-exp" value="' + esc(expiry) + '">' +
+      '<button type="button" class="date-cam c-expcam" title="賞味期限を撮って読み取る">📅</button>' +
+      '</span></label>' +
       '<label>数量<input type="number" class="c-qty" min="0.1" step="0.1" value="' +
       (c.suggested_quantity || 1) + '"></label>' +
       '<label>単位<input class="c-unit" value="' + esc(c.suggested_unit || '個') + '"></label>' +
       '</div>' +
-      '<p class="form-message">' + note + '</p>' +
+      '<p class="form-message c-note">' + note + '</p>' +
       '<div class="cand-actions">' +
       '<button class="add" type="button">在庫に追加</button>' +
       '<button class="skip" type="button">使わない</button></div></div>';
@@ -1484,6 +1512,9 @@ function renderCandidates(candidates, model) {
     const id = card.getAttribute('data-id');
     card.querySelector('.add').onclick = function () { confirmCandidate(id, card); };
     card.querySelector('.skip').onclick = function () { rejectCandidate(id, card); };
+    card.querySelector('.c-expcam').onclick = function () {
+      scanExpiryInto(card.querySelector('.c-exp'), card.querySelector('.c-note'));
+    };
   });
 }
 
@@ -1528,9 +1559,18 @@ function stopCamera() {
   }
 }
 
-async function openCamera() {
+/**
+ * カメラを開いて1枚撮る。用途に応じて見出しと説明を変える。
+ *   kind='food'   … 食材を撮る。カードの写真になり、AIが食材を判定する
+ *   kind='expiry' … 賞味期限の印字を撮る。日付を読むだけで写真は保存しない
+ *
+ * 撮影後は onShot(file) を呼ぶ。キャンセル時は onCancel()。
+ * getUserMedia が使えない環境ではOSのカメラアプリ(fallbackInput)に委ねる。
+ */
+async function openCameraFor(kind, onShot, onCancel, fallbackInput) {
+  const isExpiry = kind === 'expiry';
   const canUse = navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function';
-  if (!canUse) { $('fileCapture').click(); return; }
+  if (!canUse) { if (fallbackInput) fallbackInput.click(); return; }
 
   let stream;
   try {
@@ -1541,27 +1581,51 @@ async function openCamera() {
   } catch (e) {
     // 許可されない場合も行き止まりにせず、OSのカメラアプリ/ファイル選択に逃がす
     if (e && e.name === 'NotAllowedError') toast('カメラを使えないため、写真の選択に切り替えます', true);
-    const capture = $('fileCapture');
-    if (capture) capture.click();
+    if (fallbackInput) fallbackInput.click();
     return;
   }
 
   camStream = stream;
-  const backdrop = openModal(
-    '<section class="add-modal" role="dialog" aria-modal="true" aria-label="食材を撮影">' +
+
+  // 下のモーダル（登録画面や候補カード）を壊さないよう、独立したオーバーレイに出す
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop cam-backdrop';
+  backdrop.innerHTML =
+    '<section class="add-modal" role="dialog" aria-modal="true" aria-label="' +
+    (isExpiry ? '賞味期限を撮影' : '食材を撮影') + '">' +
     '<button class="modal-close" aria-label="閉じる">×</button>' +
-    '<div class="add-heading"><span class="eyebrow">CAMERA</span><h2>食材を撮影</h2></div>' +
+    '<div class="add-heading"><span class="eyebrow">' +
+    (isExpiry ? 'EXPIRY DATE' : 'INGREDIENT') + '</span>' +
+    '<h2>' + (isExpiry ? '賞味期限を撮影' : '食材を撮影') + '</h2>' +
+    '<p>' + (isExpiry
+      ? 'パッケージの日付部分が大きく写るように近づけてください。この写真は保存されません。'
+      : '写した食材がカードの写真になります。') + '</p></div>' +
     '<video id="camVideo" playsinline muted autoplay></video>' +
     '<div class="photo-buttons"><button class="primary" id="camShot">📷 撮影</button>' +
-    '<button id="camCancel">キャンセル</button></div></section>'
-  );
+    '<button id="camCancel">キャンセル</button></div></section>';
+  document.body.appendChild(backdrop);
+  backdrop.firstElementChild.onmousedown = function (e) { e.stopPropagation(); };
 
   const video = backdrop.querySelector('#camVideo');
   video.srcObject = stream;
   await video.play().catch(function () {});
 
-  backdrop.querySelector('#camCancel').onclick = function () { closeModal(); openAddModal(); };
-  backdrop.querySelector('.modal-close').onclick = function () { closeModal(); openAddModal(); };
+  function teardown() {
+    stopCamera();
+    backdrop.remove();
+    document.removeEventListener('keydown', onEsc, true);
+  }
+  function onEsc(e) {
+    // 下のモーダルまで閉じないよう、ここで止める
+    if (e.key === 'Escape') { e.stopPropagation(); teardown(); if (onCancel) onCancel(); }
+  }
+  document.addEventListener('keydown', onEsc, true);
+
+  function cancel() { teardown(); if (onCancel) onCancel(); }
+  backdrop.onmousedown = function (e) { if (e.target === backdrop) cancel(); };
+  backdrop.querySelector('#camCancel').onclick = cancel;
+  backdrop.querySelector('.modal-close').onclick = cancel;
+
   backdrop.querySelector('#camShot').onclick = async function () {
     if (!video.videoWidth) { toast('カメラの準備ができていません', true); return; }
     const canvas = document.createElement('canvas');
@@ -1569,11 +1633,77 @@ async function openCamera() {
     canvas.height = video.videoHeight;
     canvas.getContext('2d').drawImage(video, 0, 0);
     const blob = await new Promise(function (r) { canvas.toBlob(r, 'image/jpeg', 0.92); });
-    stopCamera();
-    closeModal();
-    openAddModal();
-    if (blob) await startScan(new File([blob], 'camera.jpg', { type: 'image/jpeg' }));
+    teardown();
+    if (blob) await onShot(new File([blob], kind + '.jpg', { type: 'image/jpeg' }));
+    else if (onCancel) onCancel();
   };
+}
+
+/** 食材カメラ。撮った写真がそのままカードの画像になる。 */
+function openCamera() {
+  // オーバーレイなので登録モーダルは開いたまま。撮影後そのまま認識に進む。
+  return openCameraFor(
+    'food',
+    function (file) { return startScan(file); },
+    null,
+    $('fileCapture')
+  );
+}
+
+/**
+ * 賞味期限カメラ。撮影 → 日付だけ読み取り → 対象の日付欄に入れる。
+ * 写真はサーバーに保存されない。
+ */
+async function scanExpiryInto(dateInput, noteEl) {
+  if (!state.household) { toast('先に家庭を作成してください', true); return; }
+
+  const hidden = document.createElement('input');
+  hidden.type = 'file';
+  hidden.accept = 'image/*';
+  hidden.setAttribute('capture', 'environment');
+  hidden.className = 'visually-hidden';
+  document.body.appendChild(hidden);
+  hidden.onchange = function () {
+    if (hidden.files[0]) readExpiry(hidden.files[0], dateInput, noteEl);
+    hidden.remove();
+  };
+
+  await openCameraFor(
+    'expiry',
+    async function (file) { await readExpiry(file, dateInput, noteEl); hidden.remove(); },
+    function () { hidden.remove(); },
+    hidden
+  );
+}
+
+async function readExpiry(file, dateInput, noteEl) {
+  const setNote = function (text, warn) {
+    if (!noteEl) { toast(text, warn); return; }
+    // className を上書きすると c-note などの目印が消えるので classList で切り替える
+    noteEl.classList.toggle('warn', !!warn);
+    noteEl.textContent = text;
+  };
+  setNote('日付を読み取っています…');
+
+  try {
+    const shrunk = await shrinkImage(file);
+    const form = new FormData();
+    form.append('file', shrunk);
+    const d = await api('/households/' + state.household + '/expiry-scan', {
+      method: 'POST', body: form,
+    });
+
+    if (!d.expires_on) {
+      setNote('日付を読み取れませんでした。手入力してください。' +
+        (d.raw_text ? '（読めた文字: ' + d.raw_text + '）' : ''), true);
+      return;
+    }
+    if (dateInput) dateInput.value = d.expires_on;
+    setNote('📅 印字から ' + d.expires_on + ' を読み取りました' +
+      (d.raw_text ? '（' + d.raw_text + '）' : ''));
+  } catch (e) {
+    setNote(e.message, true);
+  }
 }
 
 /* ------------------------------------------------------------ 初期化 --- */

@@ -17,6 +17,10 @@ const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models
  */
 export const DEFAULT_GEMINI_MODEL = 'gemini-3-flash-preview';
 
+/** 一時的な障害とみなして1回だけ再試行するHTTPステータス。 */
+const TRANSIENT_STATUSES = new Set([500, 502, 503, 504]);
+const RETRY_DELAY_MS = 1200;
+
 export type GeminiPart =
   | { text: string }
   | { inline_data: { mime_type: string; data: string } };
@@ -111,18 +115,28 @@ export async function generateJson<T = unknown>(
     },
   };
 
+  // 503(モデル混雑)などの一時的な障害だけ1回だけ再試行する。
+  // 429(レート制限)は再試行すると状況を悪化させるため対象外。
+  // JSONが壊れている場合も再試行しない（MVPの方針どおり）。
   let response: Response;
-  try {
-    response = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-  } catch (e) {
-    throw new GeminiError(
-      'network_error',
-      `Gemini APIへの接続に失敗しました: ${(e as Error).message}`,
-    );
+  let attempt = 0;
+  for (;;) {
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      throw new GeminiError(
+        'network_error',
+        `Gemini APIへの接続に失敗しました: ${(e as Error).message}`,
+      );
+    }
+
+    if (!TRANSIENT_STATUSES.has(response.status) || attempt >= 1) break;
+    attempt++;
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
   }
 
   if (response.status === 429) {
@@ -136,9 +150,12 @@ export async function generateJson<T = unknown>(
 
   if (!response.ok) {
     const detail = await safeText(response);
+    const hint = TRANSIENT_STATUSES.has(response.status)
+      ? '（再試行しましたが復旧しませんでした。時間をおいて試してください）'
+      : '';
     throw new GeminiError(
       'api_error',
-      `Gemini APIがエラーを返しました (HTTP ${response.status}): ${detail}`,
+      `Gemini APIがエラーを返しました (HTTP ${response.status})${hint}: ${detail}`,
       response.status,
     );
   }

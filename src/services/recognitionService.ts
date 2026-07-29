@@ -122,6 +122,85 @@ export function resolveSuggestedExpiry(
   return null;
 }
 
+/* -------------------------------------------------------------------------- */
+/* 賞味期限だけを読み取る（期限撮影用カメラ）                                  */
+/* -------------------------------------------------------------------------- */
+
+export type ExpiryReadResult = {
+  /** 'YYYY-MM-DD'。読み取れなければ null */
+  expires_on: string | null;
+  /** 画像から読めた日付の生テキスト（例: '26.08.20'） */
+  raw_text: string | null;
+  confidence: number | null;
+};
+
+const EXPIRY_PROMPT = [
+  'これは食品パッケージの賞味期限・消費期限の印字を撮影した写真です。',
+  '印字されている日付を1つだけ読み取ってください。',
+  '- expires_on: YYYY-MM-DD 形式。読み取れない場合は空文字にすること。',
+  '- raw_text: 画像に写っている日付の文字列をそのまま（例: 26.08.20）',
+  '- confidence: 読み取りの確信度(0〜1)',
+  '年が省略されている場合(例「8.20」)は、直近の未来の日付として解釈してください。',
+  '「製造日」と「賞味期限」が両方写っている場合は、賞味期限の方を優先してください。',
+].join('\n');
+
+const EXPIRY_SCHEMA: GeminiSchema = {
+  type: 'OBJECT',
+  properties: {
+    expires_on: { type: 'STRING' },
+    raw_text: { type: 'STRING' },
+    confidence: { type: 'NUMBER' },
+  },
+  required: ['expires_on'],
+};
+
+/**
+ * 期限の印字だけを読み取る。
+ * この写真はR2にもDBにも保存せず、読み取り後に破棄する。
+ */
+export async function readExpiryDate(
+  env: Pick<Bindings, 'GEMINI_API_KEY' | 'GEMINI_MODEL'>,
+  imageBytes: ArrayBuffer,
+  mimeType: string,
+): Promise<{ result: ExpiryReadResult; modelName: string }> {
+  const { data, modelName } = await generateJson<Record<string, unknown>>({
+    env,
+    parts: [
+      { text: EXPIRY_PROMPT },
+      {
+        inline_data: {
+          mime_type: mimeType,
+          data: arrayBufferToBase64(imageBytes),
+        },
+      },
+    ],
+    responseSchema: EXPIRY_SCHEMA,
+    temperature: 0,
+  });
+
+  if (!data || typeof data !== 'object') {
+    throw new GeminiError(
+      'invalid_json',
+      'Gemini APIのレスポンス形式が想定と異なりました',
+    );
+  }
+
+  const raw = typeof data.expires_on === 'string' ? data.expires_on.trim() : '';
+  return {
+    result: {
+      expires_on: isValidDateString(raw) ? raw : null,
+      raw_text: typeof data.raw_text === 'string' && data.raw_text.trim()
+        ? data.raw_text.trim()
+        : null,
+      confidence:
+        typeof data.confidence === 'number' && Number.isFinite(data.confidence)
+          ? Math.min(1, Math.max(0, data.confidence))
+          : null,
+    },
+    modelName,
+  };
+}
+
 /** Geminiの出力を検証して正規化する。壊れた要素は捨てる。 */
 function sanitizeResults(data: unknown): RecognitionResult[] {
   if (!Array.isArray(data)) {

@@ -150,6 +150,122 @@ describe('photos', () => {
   });
 });
 
+describe('賞味期限スキャン（期限撮影用カメラ）', () => {
+  let householdId: string;
+
+  beforeEach(async () => {
+    householdId = await createHousehold(TOKEN, '期限スキャン家族');
+  });
+
+  async function postExpiry() {
+    const form = new FormData();
+    form.append(
+      'file',
+      new File([tinyPngBytes()], 'expiry.png', { type: 'image/png' }),
+    );
+    const res = await api(`/households/${householdId}/expiry-scan`, {
+      method: 'POST',
+      body: form,
+      token: TOKEN,
+    });
+    return { status: res.status, body: (await res.json()) as any };
+  }
+
+  it('印字を読み取って日付を返す', async () => {
+    mockGemini({ expires_on: '2026-09-14', raw_text: '26.09.14', confidence: 0.97 });
+
+    const { status, body } = await postExpiry();
+    expect(status).toBe(200);
+    expect(body.expires_on).toBe('2026-09-14');
+    expect(body.raw_text).toBe('26.09.14');
+    expect(body.model_name).toBe('gemini-3-flash-preview');
+  });
+
+  it('画像はR2にもDBにも保存されない（読んだら破棄）', async () => {
+    mockGemini({ expires_on: '2026-09-14', confidence: 0.9 });
+    await postExpiry();
+
+    const photos = await apiJson(`/households/${householdId}/photos`, {
+      token: TOKEN,
+    });
+    expect(photos.body.photos).toHaveLength(0);
+  });
+
+  it('読み取れない日付は null を返す', async () => {
+    mockGemini({ expires_on: '', raw_text: 'よく見えない', confidence: 0.1 });
+
+    const { status, body } = await postExpiry();
+    expect(status).toBe(200);
+    expect(body.expires_on).toBeNull();
+    expect(body.raw_text).toBe('よく見えない');
+  });
+
+  it('実在しない日付は採用しない', async () => {
+    mockGemini({ expires_on: '2026-02-30', confidence: 0.8 });
+
+    const { body } = await postExpiry();
+    expect(body.expires_on).toBeNull();
+  });
+
+  it('メンバー以外は403', async () => {
+    const form = new FormData();
+    form.append('file', new File([tinyPngBytes()], 'e.png', { type: 'image/png' }));
+    const res = await api(`/households/${householdId}/expiry-scan`, {
+      method: 'POST',
+      body: form,
+      token: 'outsider',
+    });
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('Gemini呼び出しの再試行', () => {
+  it('503は1回だけ再試行して成功する', async () => {
+    const householdId = await createHousehold(TOKEN, '再試行テスト');
+
+    let calls = 0;
+    stubGemini(() => {
+      calls++;
+      return calls === 1
+        ? { status: 503, json: { error: { message: 'overloaded' } } }
+        : { json: geminiJsonResponse({ expires_on: '2026-10-01', confidence: 0.9 }) };
+    });
+
+    const form = new FormData();
+    form.append('file', new File([tinyPngBytes()], 'e.png', { type: 'image/png' }));
+    const res = await api(`/households/${householdId}/expiry-scan`, {
+      method: 'POST',
+      body: form,
+      token: TOKEN,
+    });
+
+    expect(calls).toBe(2);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as any).expires_on).toBe('2026-10-01');
+  });
+
+  it('429は再試行せず429を返す', async () => {
+    const householdId = await createHousehold(TOKEN, 'レート制限テスト2');
+
+    let calls = 0;
+    stubGemini(() => {
+      calls++;
+      return { status: 429, json: { error: { message: 'quota' } } };
+    });
+
+    const form = new FormData();
+    form.append('file', new File([tinyPngBytes()], 'e.png', { type: 'image/png' }));
+    const res = await api(`/households/${householdId}/expiry-scan`, {
+      method: 'POST',
+      body: form,
+      token: TOKEN,
+    });
+
+    expect(calls).toBe(1);
+    expect(res.status).toBe(429);
+  });
+});
+
 describe('recognition フロー', () => {
   let householdId: string;
 
@@ -385,11 +501,37 @@ describe('recognition フロー', () => {
     );
     expect(events.body.events[0].event_type).toBe('created');
 
-    // 在庫一覧にも出る
+    // 在庫一覧にも出る。カード表示用に署名付きの写真URLが付く。
     const list = await apiJson(`/households/${householdId}/inventory`, {
       token: TOKEN,
     });
     expect(list.body.items).toHaveLength(1);
+    expect(list.body.items[0].photo_url).toContain(`/photos/${photo.photo.id}/content`);
+    expect(list.body.items[0].photo_url).toContain('signature=');
+
+    // その署名付きURLで画像が実際に取得できる
+    const image = await api(list.body.items[0].photo_url, { token: null });
+    expect(image.status).toBe(200);
+    expect(image.headers.get('content-type')).toBe('image/png');
+  });
+
+  it('手入力（写真なし）の在庫は photo_url が null', async () => {
+    const created = await apiJson(`/households/${householdId}/inventory`, {
+      method: 'POST',
+      body: jsonBody({
+        display_name: '鮭',
+        quantity: 2,
+        unit: '切れ',
+        expires_on: dayFromToday(3),
+      }),
+      token: TOKEN,
+    });
+    expect(created.status).toBe(201);
+
+    const list = await apiJson(`/households/${householdId}/inventory`, {
+      token: TOKEN,
+    });
+    expect(list.body.items[0].photo_url).toBeNull();
   });
 
   it('確定済みの候補は再確定できない', async () => {

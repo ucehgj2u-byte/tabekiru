@@ -1,10 +1,12 @@
 import { desc, eq } from 'drizzle-orm';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { photos, type User } from '../db/schema';
 import { assertHouseholdAccess, loadPhotoForUser } from '../lib/access';
 import { optionalAuthMiddleware } from '../middleware/auth';
 import { ApiError } from '../lib/errors';
+import { GeminiError } from '../lib/geminiClient';
 import { newId } from '../lib/id';
+import { readExpiryDate } from '../services/recognitionService';
 import {
   ALLOWED_IMAGE_MIME_TYPES,
   MAX_IMAGE_BYTES,
@@ -12,6 +14,7 @@ import {
   createSignedPhotoPath,
   getPhotoObject,
   isAllowedImageMime,
+  photoSecret,
   putPhoto,
   resolveMimeType,
   verifyPhotoSignature,
@@ -24,17 +27,13 @@ export const householdPhotosRoute = new Hono<AppEnv>();
 /** 単体写真用（/photos にマウント） */
 export const photosRoute = new Hono<AppEnv>();
 
-function photoSecret(env: AppEnv['Bindings']): string {
-  return env.PHOTO_URL_SECRET?.trim() || 'dev-only-photo-url-secret';
-}
-
-/** POST /households/:id/photos — multipart画像アップロード → R2保存 → photos作成 */
-householdPhotosRoute.post('/:id/photos', async (c) => {
-  const db = c.get('db');
-  const user = c.get('user');
-  const householdId = c.req.param('id');
-  await assertHouseholdAccess(db, householdId, user.id);
-
+/**
+ * multipart の file フィールドから画像を取り出して検証する。
+ * 画像を保存する経路（アップロード）と保存しない経路（期限読み取り）で共通。
+ */
+async function readImageFromForm(
+  c: Context<AppEnv>,
+): Promise<{ bytes: ArrayBuffer; mimeType: string }> {
   const contentType = c.req.header('content-type') ?? '';
   if (!contentType.toLowerCase().includes('multipart/form-data')) {
     throw ApiError.badRequest(
@@ -85,6 +84,18 @@ householdPhotosRoute.post('/:id/photos', async (c) => {
     );
   }
 
+  return { bytes, mimeType };
+}
+
+/** POST /households/:id/photos — multipart画像アップロード → R2保存 → photos作成 */
+householdPhotosRoute.post('/:id/photos', async (c) => {
+  const db = c.get('db');
+  const user = c.get('user');
+  const householdId = c.req.param('id');
+  await assertHouseholdAccess(db, householdId, user.id);
+
+  const { bytes, mimeType } = await readImageFromForm(c);
+
   const photoId = newId('pho');
   const r2Key = buildPhotoKey(householdId, photoId, mimeType);
 
@@ -117,6 +128,29 @@ householdPhotosRoute.post('/:id/photos', async (c) => {
     },
     201,
   );
+});
+
+/**
+ * POST /households/:id/expiry-scan — 賞味期限の印字だけを読み取る。
+ * 期限撮影用カメラ専用。この画像はR2にもDBにも保存せず、読み取り後に破棄する。
+ */
+householdPhotosRoute.post('/:id/expiry-scan', async (c) => {
+  const db = c.get('db');
+  const user = c.get('user');
+  await assertHouseholdAccess(db, c.req.param('id'), user.id);
+
+  const { bytes, mimeType } = await readImageFromForm(c);
+
+  try {
+    const { result, modelName } = await readExpiryDate(c.env, bytes, mimeType);
+    return c.json({ ...result, model_name: modelName });
+  } catch (e) {
+    if (e instanceof GeminiError) {
+      const status = e.code === 'rate_limited' ? 429 : 502;
+      throw new ApiError(status, `gemini_${e.code}`, e.message);
+    }
+    throw e;
+  }
 });
 
 /** GET /households/:id/photos — アップロード済み写真一覧 */

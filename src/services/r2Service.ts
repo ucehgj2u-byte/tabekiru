@@ -109,6 +109,11 @@ export async function deletePhoto(bucket: R2Bucket, key: string): Promise<void> 
 
 const DEFAULT_TTL_SECONDS = 60 * 15;
 
+/** 署名鍵を解決する。未設定なら開発用の既定値を使う。 */
+export function photoSecret(env: { PHOTO_URL_SECRET?: string }): string {
+  return env.PHOTO_URL_SECRET?.trim() || 'dev-only-photo-url-secret';
+}
+
 /**
  * 画像取得用の署名付きURLパスを発行する。
  * secret には GEMINI_API_KEY とは別の値を使いたいところだが、MVPでは
