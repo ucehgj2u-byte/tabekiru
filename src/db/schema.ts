@@ -194,6 +194,34 @@ export const recognitionCandidates = sqliteTable(
   (t) => [index('recognition_candidates_job_idx').on(t.jobId)],
 );
 
+/**
+ * レシピ提案の履歴。追記専用。
+ * based_on_json / recipes_json は提案時点のスナップショットをJSON文字列で保持する
+ * （在庫が後で消費・削除されても履歴の内容自体は変わらないようにするため）。
+ */
+export const recipeSuggestions = sqliteTable(
+  'recipe_suggestions',
+  {
+    id: text('id').primaryKey(),
+    householdId: text('household_id')
+      .notNull()
+      .references(() => households.id),
+    requestedBy: text('requested_by')
+      .notNull()
+      .references(() => users.id),
+    modelName: text('model_name').notNull(),
+    selectionMode: text('selection_mode', {
+      enum: ['selected', 'auto'],
+    }).notNull(),
+    basedOnJson: text('based_on_json').notNull(),
+    recipesJson: text('recipes_json').notNull(),
+    createdAt: text('created_at').notNull().default(nowUtc),
+  },
+  (t) => [
+    index('recipe_suggestions_household_idx').on(t.householdId, t.createdAt),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type Household = typeof households.$inferSelect;
 export type HouseholdMember = typeof householdMembers.$inferSelect;
@@ -204,3 +232,4 @@ export type InventoryLot = typeof inventoryLots.$inferSelect;
 export type InventoryEvent = typeof inventoryEvents.$inferSelect;
 export type RecognitionJob = typeof recognitionJobs.$inferSelect;
 export type RecognitionCandidate = typeof recognitionCandidates.$inferSelect;
+export type RecipeSuggestion = typeof recipeSuggestions.$inferSelect;

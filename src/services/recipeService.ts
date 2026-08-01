@@ -17,6 +17,8 @@ export type Recipe = {
   title: string;
   used_ingredients: string[];
   steps: string[];
+  /** リストに無い、買い足すとよい食材（調味料等の一般的な常備品は含めない） */
+  missing_ingredients: string[];
 };
 
 const RESPONSE_SCHEMA: GeminiSchema = {
@@ -27,6 +29,7 @@ const RESPONSE_SCHEMA: GeminiSchema = {
       title: { type: 'STRING' },
       used_ingredients: { type: 'ARRAY', items: { type: 'STRING' } },
       steps: { type: 'ARRAY', items: { type: 'STRING' } },
+      missing_ingredients: { type: 'ARRAY', items: { type: 'STRING' } },
     },
     required: ['title', 'used_ingredients', 'steps'],
   },
@@ -47,11 +50,21 @@ export function formatIngredientList(items: RecipeInputItem[]): string {
 
 function buildPrompt(items: RecipeInputItem[]): string {
   return [
-    '以下は家庭の冷蔵庫にある、期限が近い順の食材リストです。',
-    'これらをできるだけ多く使い、食品ロスを減らせる家庭料理レシピを3つ提案してください。',
-    '調味料など一般的な家庭にあるものは追加で使って構いませんが、used_ingredients には',
-    'リスト内の食材のうち実際に使うものを日本語の名称そのままで入れてください。',
+    '以下は家庭の冷蔵庫にある食材リストです（期限が近い順）。',
+    '美味しくて満足度の高い家庭料理レシピを3つ提案してください。',
+    '',
+    '最優先は美味しさと作りやすさです。このリストの食材を無理にすべて使う必要はありません。',
+    'リストに無い食材を主役にしたレシピを含めても構いません。',
+    'ただし、リストの中に活かせる食材があれば積極的に使い、食品ロスの削減にもつながる',
+    '提案を心がけてください（「美味しいが在庫を全く使わない」提案ばかりにはしないこと）。',
+    '調味料など一般的な家庭にあるものは自由に使って構いません。',
+    '',
+    'used_ingredients には、実際にそのレシピで使うリスト内の食材だけを日本語の名称そのままで',
+    '入れてください。リストの食材を使っていないレシピの場合は空配列にしてください。',
     'steps は家庭で作れる具体的な手順を3〜8個程度で書いてください。',
+    'missing_ingredients には、リストに無いが買い足すとより美味しく/完成度高く作れる食材を',
+    '2〜4個挙げてください（塩・こしょう・油・醤油などどの家庭にもある調味料は含めないこと）。',
+    '買い足す必要が無いレシピの場合は空配列にしてください。',
     '',
     `食材リスト: ${formatIngredientList(items)}`,
   ].join('\n');
@@ -99,6 +112,7 @@ function sanitizeRecipes(data: unknown): Recipe[] {
       title,
       used_ingredients: toStringArray(item.used_ingredients),
       steps: toStringArray(item.steps),
+      missing_ingredients: toStringArray(item.missing_ingredients),
     });
   }
   return recipes;

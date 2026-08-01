@@ -166,11 +166,15 @@ export const confirmCandidateSchema = z.object({
 /* recipes                                                                     */
 /* -------------------------------------------------------------------------- */
 
-export const recipeQuerySchema = z.object({
-  /** レシピ生成に渡す食材の最大件数 */
-  limit: z.coerce.number().int().min(1).max(30).default(12),
-  /** 何日以内に期限が来る食材に絞るか（未指定なら期限順に上位 limit 件） */
-  within_days: z.coerce.number().int().min(0).max(365).optional(),
+/** ユーザーが在庫一覧から選んだ食材だけでレシピを提案させる場合のボディ。 */
+export const recipeSuggestSchema = z.object({
+  inventory_lot_ids: z.array(z.string().trim().min(1)).min(1).max(30),
+});
+
+/** レシピ提案履歴の一覧クエリ。 */
+export const historyQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+  offset: z.coerce.number().int().min(0).default(0),
 });
 
 /* -------------------------------------------------------------------------- */

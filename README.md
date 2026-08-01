@@ -314,9 +314,15 @@ household配下のリソースには、**そのhouseholdの `active` メンバ�
 
 | メソッド | パス | 説明 |
 | --- | --- | --- |
-| GET | `/households/:id/recipes/suggestions` | 期限が近い在庫を優先したレシピ提案 |
+| POST | `/households/:id/recipes/suggestions` | 選んだ食材でレシピ提案（`inventory_lot_ids`必須） |
+| GET | `/households/:id/recipes/history` | これまでの提案履歴（新しい順） |
 
-クエリ: `limit`（Geminiに渡す食材数、既定12）、`within_days`（期限で絞る）。
+`inventory_lot_ids` は1〜30件。**「期限が近い順に自動で選んでレシピ提案する」機能は廃止しています**
+（呼び出すたびにGemini APIのコストが発生するため、ユーザーが明示的に選んだ時だけ呼び出す設計にしています）。
+
+提案が成功すると `recipe_suggestions` テーブルに履歴として自動保存され、`GET /recipes/history` で
+`limit`・`offset` 付きで一覧取得できます。各エントリには使った食材(`based_on`)とレシピ本文
+（`missing_ingredients` を含む）がスナップショットとして残ります。
 
 ---
 

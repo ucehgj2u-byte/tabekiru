@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
+import { resolveSuggestedExpiry } from '../src/services/recognitionService';
 import {
   api,
   apiJson,
@@ -8,6 +9,43 @@ import {
   jsonBody,
   tinyPngBytes,
 } from './helpers';
+
+describe('resolveSuggestedExpiry（単体）', () => {
+  const today = '2026-08-01';
+
+  it('印字の日付には安全係数を掛けない', () => {
+    const r = resolveSuggestedExpiry(
+      { detected_name: '牛乳', confidence: 0.9, printed_expiry_date: '2026-08-20' },
+      today,
+    );
+    expect(r).toEqual({ date: '2026-08-20', source: 'printed' });
+  });
+
+  it('推定日数には0.8倍(floor)を適用する', () => {
+    const r = resolveSuggestedExpiry(
+      { detected_name: 'にんじん', confidence: 0.9, estimated_shelf_life_days: 21 },
+      today,
+    );
+    // floor(21 * 0.8) = 16日後
+    expect(r).toEqual({ date: '2026-08-17', source: 'estimated' });
+  });
+
+  it('係数を掛けて0日以下になっても最低1日は確保する', () => {
+    const r = resolveSuggestedExpiry(
+      { detected_name: 'もやし', confidence: 0.9, estimated_shelf_life_days: 1 },
+      today,
+    );
+    expect(r).toEqual({ date: '2026-08-02', source: 'estimated' });
+  });
+
+  it('印字も推定日数も無ければnull', () => {
+    const r = resolveSuggestedExpiry(
+      { detected_name: '謎の食品', confidence: 0.4 },
+      today,
+    );
+    expect(r).toBeNull();
+  });
+});
 
 const TOKEN = 'scan-user';
 const GEMINI_ORIGIN = 'https://generativelanguage.googleapis.com';
@@ -381,7 +419,8 @@ describe('recognition フロー', () => {
     );
     const cand = c.body.candidates[0];
     expect(cand.suggested_category).toBe('野菜');
-    expect(cand.suggested_expires_on).toBe(dayFromToday(21));
+    // 一般的な日持ち(21日)に安全係数0.8を掛けて16日に短縮される
+    expect(cand.suggested_expires_on).toBe(dayFromToday(16));
     expect(cand.expiry_source).toBe('estimated');
   });
 
@@ -431,7 +470,8 @@ describe('recognition フロー', () => {
       { method: 'POST', body: jsonBody({}), token: TOKEN },
     );
     expect(confirmed.status).toBe(201);
-    expect(confirmed.body.inventory_lot.expires_on).toBe(dayFromToday(7));
+    // 一般的な日持ち(7日)に安全係数0.8を掛けて5日に短縮される
+    expect(confirmed.body.inventory_lot.expires_on).toBe(dayFromToday(5));
     expect(confirmed.body.inventory_lot.category).toBe('大豆製品');
   });
 
@@ -454,6 +494,89 @@ describe('recognition フロー', () => {
     );
     expect(res.status).toBe(400);
     expect(res.body.error.message).toContain('expires_on');
+  });
+
+  it('1枚の写真から検出した複数候補をまとめて確定できる（UIの一括登録が使う経路）', async () => {
+    const photo = await uploadPhoto(householdId);
+    mockGemini([
+      { detected_name: 'にんじん', confidence: 0.92, category: '野菜', suggested_quantity: 2, suggested_unit: '本' },
+      { detected_name: 'りんご', confidence: 0.88, category: '果物', suggested_quantity: 1, suggested_unit: '個' },
+      { detected_name: '卵', confidence: 0.81, category: '卵', suggested_quantity: 6, suggested_unit: '個' },
+    ]);
+
+    const started = await apiJson(`/photos/${photo.photo.id}/recognize`, {
+      method: 'POST',
+      token: TOKEN,
+    });
+    const jobId = started.body.recognition_job.id;
+    const candidates = await apiJson(`/recognition-jobs/${jobId}/candidates`, {
+      token: TOKEN,
+    });
+    expect(candidates.body.candidates).toHaveLength(3);
+
+    // UIのconfirmAllCandidatesは各候補を順にconfirmする。同じ経路をここで検証する。
+    const confirmedLots = [];
+    for (const cand of candidates.body.candidates) {
+      const res = await apiJson(`/recognition-candidates/${cand.id}/confirm`, {
+        method: 'POST',
+        body: jsonBody({ expires_on: dayFromToday(7) }),
+        token: TOKEN,
+      });
+      expect(res.status).toBe(201);
+      confirmedLots.push(res.body.inventory_lot);
+    }
+
+    expect(confirmedLots.map((l: any) => l.display_name).sort()).toEqual(
+      ['にんじん', 'りんご', '卵'].sort(),
+    );
+    // 全員が同じ写真から登録されたことになっている
+    expect(confirmedLots.every((l: any) => l.photo_id === photo.photo.id)).toBe(true);
+
+    const list = await apiJson(`/households/${householdId}/inventory`, { token: TOKEN });
+    expect(list.body.items).toHaveLength(3);
+
+    // 全候補が accepted になっている
+    const after = await apiJson(`/recognition-jobs/${jobId}/candidates`, { token: TOKEN });
+    expect(after.body.candidates.every((c: any) => c.status === 'accepted')).toBe(true);
+  });
+
+  it('一括確定の途中で1件が失敗しても、他の候補は登録できる', async () => {
+    const photo = await uploadPhoto(householdId);
+    mockGemini([
+      { detected_name: 'トマト', confidence: 0.9, suggested_quantity: 2, suggested_unit: '個' },
+      { detected_name: '謎の食材', confidence: 0.3 },
+    ]);
+
+    const started = await apiJson(`/photos/${photo.photo.id}/recognize`, {
+      method: 'POST',
+      token: TOKEN,
+    });
+    const candidates = await apiJson(
+      `/recognition-jobs/${started.body.recognition_job.id}/candidates`,
+      { token: TOKEN },
+    );
+
+    const tomato = candidates.body.candidates.find((c: any) => c.detected_name === 'トマト');
+    const mystery = candidates.body.candidates.find((c: any) => c.detected_name === '謎の食材');
+
+    const ok = await apiJson(`/recognition-candidates/${tomato.id}/confirm`, {
+      method: 'POST',
+      body: jsonBody({ expires_on: dayFromToday(5) }),
+      token: TOKEN,
+    });
+    expect(ok.status).toBe(201);
+
+    // 期限の手掛かりが無い候補は expires_on 省略だと400（UI側では「まだ登録済みでない」候補として残る）
+    const fail = await apiJson(`/recognition-candidates/${mystery.id}/confirm`, {
+      method: 'POST',
+      body: jsonBody({}),
+      token: TOKEN,
+    });
+    expect(fail.status).toBe(400);
+
+    const list = await apiJson(`/households/${householdId}/inventory`, { token: TOKEN });
+    expect(list.body.items).toHaveLength(1);
+    expect(list.body.items[0].display_name).toBe('トマト');
   });
 
   it('候補を修正して確定すると在庫とcreatedイベントが作られる', async () => {
@@ -616,13 +739,46 @@ describe('recognition フロー', () => {
 });
 
 describe('recipes 提案', () => {
-  it('期限が近い在庫を元にレシピを返す', async () => {
+  it('GET /recipes/suggestions（自動選択）は廃止されている', async () => {
+    const householdId = await createHousehold(TOKEN, '廃止確認家族');
+    const { status } = await apiJson(`/households/${householdId}/recipes/suggestions`, {
+      token: TOKEN,
+    });
+    // ルートが存在しないため 404（Geminiは一切呼ばれない）
+    expect(status).toBe(404);
+    expect(geminiCalls).toHaveLength(0);
+  });
+
+  it('inventory_lot_idsを渡さないと提案できない（自動選択は無い）', async () => {
+    const householdId = await createHousehold(TOKEN, '選択必須家族');
+    await apiJson(`/households/${householdId}/inventory`, {
+      method: 'POST',
+      body: jsonBody({
+        display_name: 'ほうれん草',
+        quantity: 1,
+        unit: '束',
+        expires_on: dayFromToday(2),
+      }),
+      token: TOKEN,
+    });
+
+    const { status } = await apiJson(`/households/${householdId}/recipes/suggestions`, {
+      method: 'POST',
+      body: jsonBody({}),
+      token: TOKEN,
+    });
+    expect(status).toBe(400);
+    expect(geminiCalls).toHaveLength(0);
+  });
+
+  it('選んだ食材でレシピを返す（期限順にプロンプトへ渡る）', async () => {
     const householdId = await createHousehold(TOKEN, 'レシピテスト家族');
+    const lotIds: string[] = [];
     for (const [name, days] of [
       ['にんじん', 2],
       ['牛乳', 1],
     ] as const) {
-      await apiJson(`/households/${householdId}/inventory`, {
+      const r = await apiJson(`/households/${householdId}/inventory`, {
         method: 'POST',
         body: jsonBody({
           display_name: name,
@@ -632,6 +788,7 @@ describe('recipes 提案', () => {
         }),
         token: TOKEN,
       });
+      lotIds.push(r.body.inventory_lot.id);
     }
 
     mockGemini([
@@ -644,7 +801,11 @@ describe('recipes 提案', () => {
 
     const { status, body } = await apiJson(
       `/households/${householdId}/recipes/suggestions`,
-      { token: TOKEN },
+      {
+        method: 'POST',
+        body: jsonBody({ inventory_lot_ids: lotIds }),
+        token: TOKEN,
+      },
     );
     expect(status).toBe(200);
     expect(body.recipes).toHaveLength(1);
@@ -662,19 +823,9 @@ describe('recipes 提案', () => {
     expect(geminiCalls[0].body.contents[0].parts).toHaveLength(1);
   });
 
-  it('在庫が無ければGeminiを呼ばずに空配列を返す', async () => {
-    const householdId = await createHousehold('empty-user', '空の家');
-    const { status, body } = await apiJson(
-      `/households/${householdId}/recipes/suggestions`,
-      { token: 'empty-user' },
-    );
-    expect(status).toBe(200);
-    expect(body.recipes).toEqual([]);
-  });
-
   it('レート制限時は429を返す', async () => {
     const householdId = await createHousehold(TOKEN, 'レート制限テスト');
-    await apiJson(`/households/${householdId}/inventory`, {
+    const lot = await apiJson(`/households/${householdId}/inventory`, {
       method: 'POST',
       body: jsonBody({
         display_name: 'キャベツ',
@@ -689,9 +840,296 @@ describe('recipes 提案', () => {
 
     const { status, body } = await apiJson(
       `/households/${householdId}/recipes/suggestions`,
-      { token: TOKEN },
+      {
+        method: 'POST',
+        body: jsonBody({ inventory_lot_ids: [lot.body.inventory_lot.id] }),
+        token: TOKEN,
+      },
     );
     expect(status).toBe(429);
     expect(body.error.code).toBe('gemini_rate_limited');
+  });
+
+  it('レシピに不足食材(missing_ingredients)が含まれる', async () => {
+    const householdId = await createHousehold(TOKEN, '不足食材テスト');
+    const lot = await apiJson(`/households/${householdId}/inventory`, {
+      method: 'POST',
+      body: jsonBody({
+        display_name: 'キャベツ',
+        quantity: 1,
+        unit: '玉',
+        expires_on: dayFromToday(3),
+      }),
+      token: TOKEN,
+    });
+
+    mockGemini([
+      {
+        title: 'キャベツと豚肉の炒め物',
+        used_ingredients: ['キャベツ'],
+        steps: ['切る', '炒める'],
+        missing_ingredients: ['豚肉', 'ごま油'],
+      },
+    ]);
+
+    const { status, body } = await apiJson(
+      `/households/${householdId}/recipes/suggestions`,
+      {
+        method: 'POST',
+        body: jsonBody({ inventory_lot_ids: [lot.body.inventory_lot.id] }),
+        token: TOKEN,
+      },
+    );
+    expect(status).toBe(200);
+    expect(body.recipes[0].missing_ingredients).toEqual(['豚肉', 'ごま油']);
+  });
+
+  it('missing_ingredientsが無い場合は空配列になる', async () => {
+    const householdId = await createHousehold(TOKEN, '不足食材なしテスト');
+    const lot = await apiJson(`/households/${householdId}/inventory`, {
+      method: 'POST',
+      body: jsonBody({
+        display_name: 'りんご',
+        quantity: 1,
+        unit: '個',
+        expires_on: dayFromToday(3),
+      }),
+      token: TOKEN,
+    });
+
+    mockGemini([
+      { title: 'りんごだけで完成', used_ingredients: ['りんご'], steps: ['切る'] },
+    ]);
+
+    const { body } = await apiJson(
+      `/households/${householdId}/recipes/suggestions`,
+      {
+        method: 'POST',
+        body: jsonBody({ inventory_lot_ids: [lot.body.inventory_lot.id] }),
+        token: TOKEN,
+      },
+    );
+    expect(body.recipes[0].missing_ingredients).toEqual([]);
+  });
+
+  it('提案が成功すると履歴として保存され、selection_modeはselectedになる', async () => {
+    const householdId = await createHousehold(TOKEN, '履歴テスト家族');
+    const lot = await apiJson(`/households/${householdId}/inventory`, {
+      method: 'POST',
+      body: jsonBody({
+        display_name: 'なす',
+        quantity: 2,
+        unit: '本',
+        expires_on: dayFromToday(3),
+      }),
+      token: TOKEN,
+    });
+
+    mockGemini([
+      {
+        title: 'なすの味噌炒め',
+        used_ingredients: ['なす'],
+        steps: ['切る', '炒める', '味噌で味付け'],
+        missing_ingredients: ['味噌'],
+      },
+    ]);
+
+    const suggestion = await apiJson(
+      `/households/${householdId}/recipes/suggestions`,
+      {
+        method: 'POST',
+        body: jsonBody({ inventory_lot_ids: [lot.body.inventory_lot.id] }),
+        token: TOKEN,
+      },
+    );
+    expect(suggestion.status).toBe(200);
+
+    const history = await apiJson(`/households/${householdId}/recipes/history`, {
+      token: TOKEN,
+    });
+    expect(history.status).toBe(200);
+    expect(history.body.history).toHaveLength(1);
+    const entry = history.body.history[0];
+    expect(entry.model_name).toBe('gemini-3-flash-preview');
+    expect(entry.selection_mode).toBe('selected');
+    expect(entry.recipes[0].title).toBe('なすの味噌炒め');
+    expect(entry.recipes[0].missing_ingredients).toEqual(['味噌']);
+    expect(entry.based_on[0].display_name).toBe('なす');
+    expect(entry.created_at).toBeDefined();
+  });
+
+  it('履歴は新しい順に並び、他householdのものは見えない', async () => {
+    const householdId = await createHousehold(TOKEN, '順序履歴テスト');
+    const otherHouseholdId = await createHousehold('other-history-user', '他人の履歴家');
+
+    const daikon = await apiJson(`/households/${householdId}/inventory`, {
+      method: 'POST',
+      body: jsonBody({
+        display_name: '大根', quantity: 1, unit: '本', expires_on: dayFromToday(5),
+      }),
+      token: TOKEN,
+    });
+    const negi = await apiJson(`/households/${otherHouseholdId}/inventory`, {
+      method: 'POST',
+      body: jsonBody({
+        display_name: 'ネギ', quantity: 1, unit: '本', expires_on: dayFromToday(5),
+      }),
+      token: 'other-history-user',
+    });
+    const daikonId = daikon.body.inventory_lot.id;
+    const negiId = negi.body.inventory_lot.id;
+
+    mockGemini([{ title: '大根の煮物', used_ingredients: ['大根'], steps: ['煮る'] }]);
+    await apiJson(`/households/${householdId}/recipes/suggestions`, {
+      method: 'POST',
+      body: jsonBody({ inventory_lot_ids: [daikonId] }),
+      token: TOKEN,
+    });
+
+    mockGemini([{ title: 'ネギ味噌', used_ingredients: ['ネギ'], steps: ['刻む'] }]);
+    await apiJson(`/households/${otherHouseholdId}/recipes/suggestions`, {
+      method: 'POST',
+      body: jsonBody({ inventory_lot_ids: [negiId] }),
+      token: 'other-history-user',
+    });
+
+    mockGemini([{ title: '大根サラダ', used_ingredients: ['大根'], steps: ['和える'] }]);
+    await apiJson(`/households/${householdId}/recipes/suggestions`, {
+      method: 'POST',
+      body: jsonBody({ inventory_lot_ids: [daikonId] }),
+      token: TOKEN,
+    });
+
+    const history = await apiJson(`/households/${householdId}/recipes/history`, {
+      token: TOKEN,
+    });
+    expect(history.body.history).toHaveLength(2);
+    // 新しい順
+    expect(history.body.history[0].recipes[0].title).toBe('大根サラダ');
+    expect(history.body.history[1].recipes[0].title).toBe('大根の煮物');
+  });
+
+  it('POSTで選んだ食材だけをGeminiに渡す', async () => {
+    const householdId = await createHousehold(TOKEN, '選択レシピテスト');
+    const lotIds: Record<string, string> = {};
+    for (const [name, days] of [
+      ['にんじん', 2],
+      ['牛乳', 1],
+      ['キャベツ', 5],
+    ] as const) {
+      const r = await apiJson(`/households/${householdId}/inventory`, {
+        method: 'POST',
+        body: jsonBody({
+          display_name: name,
+          quantity: 1,
+          unit: '個',
+          expires_on: dayFromToday(days),
+        }),
+        token: TOKEN,
+      });
+      lotIds[name] = r.body.inventory_lot.id;
+    }
+
+    mockGemini([
+      {
+        title: 'にんじんとキャベツの炒め物',
+        used_ingredients: ['にんじん', 'キャベツ'],
+        steps: ['切る', '炒める', '味付けする'],
+      },
+    ]);
+
+    // 牛乳は選ばず、にんじん・キャベツだけ選択する
+    const { status, body } = await apiJson(
+      `/households/${householdId}/recipes/suggestions`,
+      {
+        method: 'POST',
+        body: jsonBody({
+          inventory_lot_ids: [lotIds['にんじん'], lotIds['キャベツ']],
+        }),
+        token: TOKEN,
+      },
+    );
+    expect(status).toBe(200);
+    expect(body.based_on.map((b: any) => b.display_name).sort()).toEqual([
+      'にんじん',
+      'キャベツ',
+    ]);
+
+    const prompt = geminiCalls[0].body.contents[0].parts[0].text as string;
+    expect(prompt).toContain('にんじん');
+    expect(prompt).toContain('キャベツ');
+    expect(prompt).not.toContain('牛乳');
+  });
+
+  it('他householdの在庫IDを混ぜても無視される', async () => {
+    const householdId = await createHousehold(TOKEN, '選択レシピ自宅');
+    const otherHouseholdId = await createHousehold('other-recipe-user', '他人の家');
+
+    const mine = await apiJson(`/households/${householdId}/inventory`, {
+      method: 'POST',
+      body: jsonBody({
+        display_name: 'トマト',
+        quantity: 1,
+        unit: '個',
+        expires_on: dayFromToday(3),
+      }),
+      token: TOKEN,
+    });
+    const theirs = await apiJson(`/households/${otherHouseholdId}/inventory`, {
+      method: 'POST',
+      body: jsonBody({
+        display_name: '豚肉',
+        quantity: 1,
+        unit: 'パック',
+        expires_on: dayFromToday(3),
+      }),
+      token: 'other-recipe-user',
+    });
+
+    mockGemini([{ title: 'トマト炒め', used_ingredients: ['トマト'], steps: ['炒める'] }]);
+
+    const { status, body } = await apiJson(
+      `/households/${householdId}/recipes/suggestions`,
+      {
+        method: 'POST',
+        body: jsonBody({
+          inventory_lot_ids: [
+            mine.body.inventory_lot.id,
+            theirs.body.inventory_lot.id,
+          ],
+        }),
+        token: TOKEN,
+      },
+    );
+    expect(status).toBe(200);
+    expect(body.based_on).toHaveLength(1);
+    expect(body.based_on[0].display_name).toBe('トマト');
+  });
+
+  it('選択した在庫が消費済み等で見つからない場合は400', async () => {
+    const householdId = await createHousehold(TOKEN, '選択レシピ空撃ち');
+    const { status, body } = await apiJson(
+      `/households/${householdId}/recipes/suggestions`,
+      {
+        method: 'POST',
+        body: jsonBody({ inventory_lot_ids: ['lot_does_not_exist'] }),
+        token: TOKEN,
+      },
+    );
+    expect(status).toBe(400);
+    expect(body.error.code).toBe('bad_request');
+  });
+
+  it('inventory_lot_idsが空配列だと400', async () => {
+    const householdId = await createHousehold(TOKEN, '選択レシピ空配列');
+    const { status } = await apiJson(
+      `/households/${householdId}/recipes/suggestions`,
+      {
+        method: 'POST',
+        body: jsonBody({ inventory_lot_ids: [] }),
+        token: TOKEN,
+      },
+    );
+    expect(status).toBe(400);
   });
 });

@@ -101,9 +101,17 @@ function isValidDateString(value: string): boolean {
 }
 
 /**
+ * 一般的な日持ち日数から期限を推定する際の安全係数。
+ * Geminiの「一般的な日持ち」知識は楽観的な値になりがちなため、
+ * 牛乳・卵のように余裕を持たせた期限になるよう短縮する。
+ * パッケージの印字を読み取れた場合（source: 'printed'）には適用しない。
+ */
+export const ESTIMATED_SHELF_LIFE_SAFETY_FACTOR = 0.8;
+
+/**
  * 候補の消費期限を決める。
  * 1. パッケージの印字を読み取れていればそれを使う（source: 'printed'）
- * 2. 無ければ一般的な日持ち日数から算出する（source: 'estimated'）
+ * 2. 無ければ一般的な日持ち日数に安全係数を掛けて算出する（source: 'estimated'）
  * 3. どちらも無ければ null（UIで手入力してもらう）
  */
 export function resolveSuggestedExpiry(
@@ -114,8 +122,12 @@ export function resolveSuggestedExpiry(
     return { date: result.printed_expiry_date, source: 'printed' };
   }
   if (result.estimated_shelf_life_days !== undefined) {
+    const days = Math.max(
+      1,
+      Math.floor(result.estimated_shelf_life_days * ESTIMATED_SHELF_LIFE_SAFETY_FACTOR),
+    );
     return {
-      date: addDays(today, result.estimated_shelf_life_days),
+      date: addDays(today, days),
       source: 'estimated',
     };
   }

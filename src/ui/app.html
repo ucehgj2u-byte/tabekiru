@@ -288,6 +288,21 @@ button { color: inherit; }
 
 .expiry-pill.hot { color: white; background: var(--orange); }
 
+/* 画像下部のクイックアクション（カードを開かず直接 食べた/捨てた を実行） */
+.quick-actions {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 1;
+  display: flex; gap: 6px; padding: 8px;
+  background: linear-gradient(to top, rgba(20, 26, 18, 0.62), rgba(20, 26, 18, 0));
+}
+.qa-btn {
+  flex: 1; min-width: 0; border: 0; border-radius: 999px; padding: 6px 2px;
+  font-size: 10.5px; font-weight: 800; cursor: pointer; white-space: nowrap;
+  background: rgba(255, 255, 255, 0.94); color: var(--leaf);
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+.qa-btn:hover { background: white; transform: translateY(-1px); }
+.qa-btn.qa-toss { color: #9d4526; }
+
 .food-info {
   min-width: 0; padding: 13px 5px 10px; display: flex;
   justify-content: space-between; align-items: flex-end; gap: 8px;
@@ -376,6 +391,31 @@ button { color: inherit; }
   border: 1px solid var(--line); background: var(--paper); font-size: 15px; line-height: 1;
 }
 .date-cam:hover { background: var(--paper-2, rgba(0,0,0,.04)); }
+
+/* 食材選択バー（レシピに使う在庫を選ぶ） */
+.select-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: -6px 0 14px; padding: 10px 14px; border-radius: 14px;
+  background: var(--accent-weak, rgba(58, 122, 63, .08)); border: 1px solid var(--line);
+}
+.select-bar span { font-size: 13px; font-weight: 600; color: var(--ink); margin-right: auto; }
+.select-bar button {
+  border-radius: 999px; padding: 6px 14px; font-size: 12px; font-weight: 600;
+  border: 1px solid var(--line); background: var(--paper); cursor: pointer;
+}
+.select-bar button.ghost { background: transparent; }
+.select-bar button.primary { border-color: var(--leaf); background: var(--leaf); color: #fff; }
+
+/* カード左上の選択チェック */
+.food-card { position: relative; }
+.pick-check {
+  position: absolute; top: 8px; left: 8px; z-index: 2;
+  width: 24px; height: 24px; border-radius: 999px; cursor: pointer;
+  background: rgba(255,255,255,.92); border: 2px solid rgba(255,255,255,.92);
+  display: grid; place-items: center; font-size: 13px; color: transparent;
+  box-shadow: 0 2px 6px rgba(0,0,0,.15);
+}
+.pick-check.on { background: var(--leaf); border-color: var(--leaf); color: #fff; }
 
 @keyframes fade { from { opacity: 0; } }
 
@@ -483,6 +523,32 @@ button { color: inherit; }
   font-size: 12px; line-height: 1.7;
 }
 
+.recipe-list .missing-line {
+  margin: 7px 0 0; padding: 6px 9px; border-radius: 9px;
+  background: rgba(217, 131, 36, .1); color: #8a5a1c; font-size: 11px;
+}
+
+/* レシピ提案履歴 */
+.history-entry { margin-bottom: 18px; }
+.history-entry:last-child { margin-bottom: 0; }
+.history-entry-head {
+  margin: 0 0 8px; padding-bottom: 6px; border-bottom: 1px dashed var(--line);
+  color: var(--muted); font-size: 11px; font-weight: 700;
+}
+.history-entry article {
+  padding: 14px; display: grid; grid-template-columns: 35px 1fr;
+  align-items: start; gap: 10px; border: 1px solid var(--line); border-radius: 16px;
+  margin-top: 8px;
+}
+.history-entry article > span { color: var(--leaf); font: italic 700 16px/1 Georgia, serif; }
+.history-entry article h3 { margin: 0; font-size: 14px; }
+.history-entry article p { margin: 4px 0 0; color: var(--muted); font-size: 10px; }
+.history-entry article ol { margin: 8px 0 0; padding-left: 17px; color: var(--ink); font-size: 12px; line-height: 1.7; }
+.history-entry article .missing-line {
+  margin: 7px 0 0; padding: 6px 9px; border-radius: 9px;
+  background: rgba(217, 131, 36, .1); color: #8a5a1c; font-size: 11px;
+}
+
 .toast {
   position: fixed; z-index: 70; left: 50%; bottom: 110px;
   transform: translateX(-50%); min-width: 280px; max-width: min(92vw, 420px);
@@ -517,6 +583,17 @@ button { color: inherit; }
 .stat-card b.warm { color: var(--orange); }
 .stat-card span { color: var(--muted); font-size: 11px; font-weight: 700; }
 
+/* 履歴の折りたたみ */
+.history-details { margin-top: 18px; }
+.history-details summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px;
+  font: 700 15px/1 Georgia, 'Yu Mincho', serif; color: var(--ink); padding: 4px 0;
+}
+.history-details summary::-webkit-details-marker { display: none; }
+.history-details summary .chev { color: var(--muted); font-size: 12px; transition: transform .15s ease; }
+.history-details[open] summary .chev { transform: rotate(-180deg); }
+.history-details summary:hover { color: var(--leaf); }
+
 .history-list { margin-top: 14px; display: grid; gap: 8px; }
 
 .history-list article {
@@ -537,6 +614,18 @@ button { color: inherit; }
 .event-tag.adjusted { background: #e9e9e2; color: var(--muted); }
 
 /* ---------- 追加分：認識候補 ---------- */
+
+.bulk-bar {
+  margin-top: 12px; padding: 12px 14px; border-radius: 16px;
+  background: var(--lime-soft, #eaf3df); display: flex; align-items: center;
+  gap: 10px; flex-wrap: wrap;
+}
+.bulk-bar button {
+  border: 0; border-radius: 999px; padding: 9px 16px; font-size: 13px;
+  font-weight: 700; color: white; background: var(--leaf); cursor: pointer;
+}
+.bulk-bar button:disabled { opacity: .6; cursor: not-allowed; }
+.bulk-bar .form-message { margin: 0; }
 
 .cand-card {
   margin-top: 12px; padding: 14px; border: 1px solid var(--line);
@@ -582,6 +671,36 @@ button { color: inherit; }
 .mode-tabs button.active { color: white; background: var(--ink); border-color: var(--ink); }
 
 .photo-buttons { margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+/* レシピモーダル内の「使う食材を選ぶ」ピッカー */
+.recipe-picker {
+  margin: -6px 0 18px; padding: 12px 14px; border: 1px solid var(--line);
+  border-radius: 16px; background: var(--paper-2, #f7f6f0);
+}
+.recipe-picker summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center;
+  justify-content: space-between; font-weight: 800; font-size: 13px; color: var(--ink);
+}
+.recipe-picker summary::-webkit-details-marker { display: none; }
+.recipe-picker summary .chev { color: var(--muted); font-size: 12px; transition: transform .15s ease; }
+.recipe-picker[open] summary .chev { transform: rotate(-180deg); }
+.recipe-picker-hint { margin: 8px 0 0; color: var(--muted); font-size: 11px; }
+.recipe-picker-list {
+  margin-top: 10px; display: grid; gap: 6px; max-height: 220px; overflow-y: auto;
+}
+.recipe-picker-item {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 12px; background: white;
+  font-size: 12px; cursor: pointer;
+}
+.recipe-picker-item input { flex-shrink: 0; }
+.recipe-picker-item span { flex: 1; font-weight: 700; }
+.recipe-picker-item small { color: var(--muted); font-size: 10px; }
+.recipe-picker-item small.hot { color: var(--orange); font-weight: 800; }
+.recipe-picker-go {
+  margin-top: 12px; width: 100%; min-height: 42px; border: 0; border-radius: 999px;
+  background: var(--leaf); color: white; font-weight: 800; font-size: 12px; cursor: pointer;
+}
 
 .photo-buttons button {
   min-height: 46px; border: 1px solid var(--line); border-radius: 13px;
@@ -729,6 +848,11 @@ button { color: inherit; }
       </label>
     </div>
     <div class="category-row" id="categoryRow" role="list" aria-label="食材カテゴリ"></div>
+    <div class="select-bar" id="selectBar" hidden>
+      <span id="selectCount"></span>
+      <button class="ghost" id="selectClear">選択を解除</button>
+      <button class="primary" id="selectRecipe">選んだ食材でレシピ →</button>
+    </div>
     <div id="inventoryArea"></div>
   </section>
 
@@ -741,7 +865,10 @@ button { color: inherit; }
       <p style="margin:0 0 4px;color:var(--muted);font-size:12px">消費と廃棄の履歴から集計しています</p>
     </div>
     <div class="stats-grid" id="statsGrid"></div>
-    <div class="history-list" id="historyList"></div>
+    <details class="history-details" id="historyDetails">
+      <summary><span id="historySummary">履歴</span><span class="chev">▾</span></summary>
+      <div class="history-list" id="historyList"></div>
+    </details>
   </section>
 
   <nav class="bottom-dock single-action" aria-label="食材登録">
@@ -792,6 +919,8 @@ const state = {
   category: '',
   query: '',
   loading: true,
+  /** レシピに使う食材として選択中のinventory_lot_id */
+  selected: new Set(),
 };
 
 /* ---------------------------------------------------------------- 共通 --- */
@@ -1013,7 +1142,11 @@ function renderStories() {
       return '<button class="story" data-id="' + esc(item.id) + '" aria-label="' +
         esc(item.display_name + '、' + expiryLabel(item)) + '">' +
         '<span class="story-ring' + urgent + '" style="--progress:' + ringProgress(item) + '%">' +
-        '<span class="story-image"><span>' + catOf(item).icon + '</span></span></span>' +
+        '<span class="story-image">' +
+        (item.photo_url
+          ? '<img src="' + esc(item.photo_url) + '" alt="" loading="lazy">'
+          : '<span>' + catOf(item).icon + '</span>') +
+        '</span></span>' +
         '<strong>' + esc(item.display_name) + '</strong>' +
         '<small>' + esc(expiryLabel(item)) + '</small></button>';
     }).join('') +
@@ -1086,12 +1219,20 @@ function renderInventory() {
   area.innerHTML = '<div class="food-grid">' + items.map(function (item) {
     const days = daysUntil(item.expires_on);
     const cat = catOf(item);
+    const picked = state.selected.has(item.id);
     return '<article class="food-card" data-id="' + esc(item.id) + '">' +
+      '<button type="button" class="pick-check' + (picked ? ' on' : '') +
+      '" data-pick="' + esc(item.id) + '" aria-pressed="' + picked +
+      '" aria-label="レシピに使う食材として選ぶ">✓</button>' +
       '<div class="food-photo food-' + cat.cls + '">' +
       (item.photo_url
         ? '<img src="' + esc(item.photo_url) + '" alt="' + esc(item.display_name) + 'の登録写真" loading="lazy">'
         : '<span>' + cat.icon + '</span>') +
-      '<span class="expiry-pill' + (days <= 1 ? ' hot' : '') + '">' + esc(expiryLabel(item)) + '</span></div>' +
+      '<span class="expiry-pill' + (days <= 1 ? ' hot' : '') + '">' + esc(expiryLabel(item)) + '</span>' +
+      '<div class="quick-actions">' +
+      '<button type="button" class="qa-btn qa-eat" data-eat="' + esc(item.id) + '" aria-label="食べた">✓ 食べた</button>' +
+      '<button type="button" class="qa-btn qa-toss" data-toss="' + esc(item.id) + '" aria-label="捨てた">🗑 捨てた</button>' +
+      '</div></div>' +
       '<div class="food-info"><div>' +
       '<span class="category-label">' + esc(item.category || '未分類') +
       (item.source === 'scan' ? ' · 📷' : '') + '</span>' +
@@ -1101,9 +1242,58 @@ function renderInventory() {
       '</article>';
   }).join('') + '</div>';
 
+  const byId = {};
+  items.forEach(function (i) { byId[i.id] = i; });
+
   area.querySelectorAll('.food-card').forEach(function (card) {
     card.onclick = function () { openDetail(card.getAttribute('data-id')); };
   });
+  area.querySelectorAll('.pick-check').forEach(function (btn) {
+    btn.onclick = function (e) {
+      e.stopPropagation();
+      toggleSelected(btn.getAttribute('data-pick'));
+    };
+  });
+  area.querySelectorAll('.qa-eat').forEach(function (btn) {
+    btn.onclick = function (e) {
+      e.stopPropagation();
+      const item = byId[btn.getAttribute('data-eat')];
+      if (item) changeLot(item, 'consume');
+    };
+  });
+  area.querySelectorAll('.qa-toss').forEach(function (btn) {
+    btn.onclick = function (e) {
+      e.stopPropagation();
+      const item = byId[btn.getAttribute('data-toss')];
+      if (item) changeLot(item, 'discard');
+    };
+  });
+
+  renderSelectBar();
+}
+
+/** レシピに使う食材としての選択をON/OFFする。 */
+function toggleSelected(id) {
+  if (state.selected.has(id)) state.selected.delete(id);
+  else state.selected.add(id);
+
+  // カード全体を作り直さず、対象の見た目だけ更新する
+  const btn = document.querySelector('.pick-check[data-pick="' + CSS.escape(id) + '"]');
+  if (btn) {
+    const on = state.selected.has(id);
+    btn.className = 'pick-check' + (on ? ' on' : '');
+    btn.setAttribute('aria-pressed', String(on));
+  }
+  renderSelectBar();
+}
+
+function renderSelectBar() {
+  const bar = $('selectBar');
+  if (!bar) return;
+  const n = state.selected.size;
+  bar.hidden = n === 0;
+  if (n === 0) return;
+  $('selectCount').textContent = n + '品を選択中';
 }
 
 function renderWasteAlert() {
@@ -1139,6 +1329,19 @@ function renderStats() {
           '</span></article>';
       }).join('')
     : '<article><small>まだ記録がありません。</small></article>';
+
+  const summary = $('historySummary');
+  if (summary) summary.textContent = '履歴' + (state.events.length ? '（' + state.events.length + '件）' : '');
+}
+
+/** 履歴の開閉状態をブラウザに記憶する（既定は閉じておく）。 */
+function initHistoryToggle() {
+  const details = $('historyDetails');
+  if (!details) return;
+  details.open = localStorage.getItem('historyOpen') === '1';
+  details.addEventListener('toggle', function () {
+    localStorage.setItem('historyOpen', details.open ? '1' : '0');
+  });
 }
 
 /* ------------------------------------------------------------ 詳細モーダル --- */
@@ -1176,7 +1379,7 @@ function openDetail(id) {
         backdrop.querySelector('#dConsume').onclick = function () { changeLot(item, 'consume'); };
         backdrop.querySelector('#dDiscard').onclick = function () { changeLot(item, 'discard'); };
         backdrop.querySelector('#dPartial').onclick = function () { changeLot(item, 'consume', true); };
-        backdrop.querySelector('#dRecipe').onclick = openRecipes;
+        backdrop.querySelector('#dRecipe').onclick = function () { openRecipes([item.id]); };
       },
     }
   );
@@ -1198,6 +1401,7 @@ async function changeLot(item, kind, askQuantity) {
   }
   try {
     await api('/inventory/' + item.id + '/' + kind, { method: 'POST', json: body });
+    state.selected.delete(item.id);
     closeModal();
     toast(item.display_name + 'を「' + label + '」にしました');
     await refreshAll();
@@ -1206,18 +1410,54 @@ async function changeLot(item, kind, askQuantity) {
 
 /* ------------------------------------------------------------ レシピ --- */
 
-async function openRecipes() {
+/**
+ * レシピ提案モーダルを開く。
+ * ids を渡すとその食材で即座に提案する。省略した場合は何もAPIを呼ばず、
+ * 「使う食材を選ぶ」ピッカーを開いた状態で表示し、ユーザーが選んで
+ * 「提案してもらう」ボタンを押した時だけGeminiを呼ぶ
+ * （期限が近い順の自動提案は、開くたびにAPIコストが発生するため廃止した）。
+ */
+async function openRecipes(ids) {
+  const usingSelection = Array.isArray(ids) && ids.length > 0;
+  const checkedIds = new Set(usingSelection ? ids : []);
+
   openModal(
     '<section class="recipe-modal" role="dialog" aria-modal="true">' +
     '<button class="modal-close" aria-label="閉じる">×</button>' +
     '<span class="eyebrow">ZERO-WASTE RECIPES</span>' +
     '<h2>いま作るなら、これ。</h2>' +
-    '<p class="recipe-lead" id="recipeLead">期限が近い食材から考えています…</p>' +
-    '<div class="recipe-list" id="recipeList"></div></section>'
+    '<div class="mode-tabs" id="recipeTabs">' +
+    '<button class="active" id="tabRecipeNew">提案</button>' +
+    '<button id="tabRecipeHistory">これまでの提案</button></div>' +
+    '<details class="recipe-picker" id="recipePicker" open>' +
+    '<summary>使う食材を選ぶ<span class="chev">▾</span></summary>' +
+    '<p class="recipe-picker-hint">使う食材にチェックを入れてから提案してもらいます。</p>' +
+    '<div class="recipe-picker-list" id="recipePickerList"></div>' +
+    '<button type="button" class="recipe-picker-go" id="recipePickerGo">提案してもらう</button>' +
+    '</details>' +
+    '<p class="recipe-lead" id="recipeLead">' +
+    (usingSelection ? '選んだ食材から考えています…' : '使う食材にチェックを入れて「提案してもらう」を押してください。') + '</p>' +
+    '<div class="recipe-list" id="recipeList"></div></section>',
+    { onOpen: function (backdrop) {
+        backdrop.querySelector('#tabRecipeHistory').onclick = openRecipeHistory;
+        backdrop.querySelector('#tabRecipeNew').onclick = function () { openRecipes(ids); };
+        renderRecipePicker(checkedIds);
+        backdrop.querySelector('#recipePickerGo').onclick = function () {
+          const chosen = Array.from(checkedIds);
+          if (!chosen.length) { toast('使う食材を1つ以上選んでください', true); return; }
+          openRecipes(chosen);
+        };
+      } }
   );
 
+  // 何も選ばれていない場合はここで終わり。APIは一切呼ばない。
+  if (!usingSelection) return;
+
   try {
-    const d = await api('/households/' + state.household + '/recipes/suggestions');
+    const d = await api('/households/' + state.household + '/recipes/suggestions', {
+      method: 'POST', json: { inventory_lot_ids: ids },
+    });
+
     const lead = $('recipeLead');
     const list = $('recipeList');
     if (!lead || !list) return; // 閉じられた
@@ -1226,17 +1466,96 @@ async function openRecipes() {
       lead.textContent = d.message || '提案できるレシピがありませんでした。';
       return;
     }
-    lead.textContent = '期限が近い ' + d.based_on.length + ' 品から、' + d.model_name + ' が提案しました。';
-    list.innerHTML = d.recipes.map(function (r, i) {
-      return '<article><span>0' + (i + 1) + '</span><div>' +
-        '<h3>' + esc(r.title) + '</h3>' +
-        '<p>' + (r.used_ingredients.length ? esc(r.used_ingredients.join('・')) + 'が使えます' : '定番食材で作れます') + '</p>' +
-        '<ol>' + r.steps.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ol>' +
-        '</div></article>';
-    }).join('');
+    lead.textContent = '選んだ ' + d.based_on.length + ' 品から、' + d.model_name + ' が提案しました。';
+    list.innerHTML = renderRecipeArticles(d.recipes);
+
+    // 選んでレシピを取得したら、在庫一覧側の選択状態はクリアする（見た目も戻す）
+    state.selected.clear();
+    renderInventory();
   } catch (e) {
     const lead = $('recipeLead');
     if (lead) lead.textContent = e.message;
+  }
+}
+
+/**
+ * レシピモーダル内の「使う食材を選ぶ」チェックリストを描画する。
+ * checkedIds は呼び出し元と共有するSetで、チェックの変更をそのまま書き込む。
+ */
+function renderRecipePicker(checkedIds) {
+  const list = $('recipePickerList');
+  if (!list) return;
+
+  if (!state.items.length) {
+    list.innerHTML = '<p class="form-message">在庫がありません。先に食材を登録してください。</p>';
+    return;
+  }
+
+  list.innerHTML = state.items.map(function (item) {
+    const days = daysUntil(item.expires_on);
+    return '<label class="recipe-picker-item">' +
+      '<input type="checkbox" data-rid="' + esc(item.id) + '"' +
+      (checkedIds.has(item.id) ? ' checked' : '') + '>' +
+      '<span>' + esc(item.display_name) + '</span>' +
+      '<small class="' + (days <= 1 ? 'hot' : '') + '">' + esc(expiryLabel(item)) + '</small>' +
+      '</label>';
+  }).join('');
+
+  list.querySelectorAll('input[type=checkbox]').forEach(function (cb) {
+    cb.onchange = function () {
+      const id = cb.getAttribute('data-rid');
+      if (cb.checked) checkedIds.add(id); else checkedIds.delete(id);
+    };
+  });
+}
+
+/** レシピ配列をrecipe-list用のHTMLに変換する（新規提案・履歴の両方で使う）。 */
+function renderRecipeArticles(recipes) {
+  return recipes.map(function (r, i) {
+    const missing = (r.missing_ingredients || []).filter(Boolean);
+    return '<article><span>0' + (i + 1) + '</span><div>' +
+      '<h3>' + esc(r.title) + '</h3>' +
+      '<p>' + (r.used_ingredients.length ? esc(r.used_ingredients.join('・')) + 'が使えます' : '定番食材で作れます') + '</p>' +
+      (missing.length ? '<p class="missing-line">🛒 買い足すと良いもの: ' + esc(missing.join('・')) + '</p>' : '') +
+      '<ol>' + r.steps.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ol>' +
+      '</div></article>';
+  }).join('');
+}
+
+/** レシピモーダルを「これまでの提案」タブに切り替える。 */
+async function openRecipeHistory() {
+  const tabNew = $('tabRecipeNew');
+  const tabHistory = $('tabRecipeHistory');
+  if (tabNew) tabNew.className = '';
+  if (tabHistory) tabHistory.className = 'active';
+  const picker = $('recipePicker');
+  if (picker) picker.hidden = true;
+
+  const lead = $('recipeLead');
+  const list = $('recipeList');
+  if (!lead || !list) return;
+  lead.textContent = '読み込んでいます…';
+  list.innerHTML = '';
+
+  try {
+    const d = await api('/households/' + state.household + '/recipes/history?limit=20');
+    if (!$('recipeList')) return; // 閉じられた
+
+    if (!d.history.length) {
+      lead.textContent = 'まだ提案の記録がありません。';
+      return;
+    }
+    lead.textContent = d.history.length + '件の提案履歴です。';
+    list.innerHTML = d.history.map(function (h) {
+      const modeLabel = h.selection_mode === 'selected' ? '選んだ食材から' : '期限が近い食材から';
+      const names = h.based_on.map(function (b) { return b.display_name; }).join('・');
+      return '<div class="history-entry">' +
+        '<div class="history-entry-head">' +
+        '<span>' + esc(h.created_at) + '・' + esc(modeLabel) + '（' + esc(names) + '）</span>' +
+        '</div>' + renderRecipeArticles(h.recipes) + '</div>';
+    }).join('');
+  } catch (e) {
+    lead.textContent = e.message;
   }
 }
 
@@ -1469,7 +1788,14 @@ function renderCandidates(candidates, model) {
     message.textContent = model + ' が ' + candidates.length + ' 品を見つけました。内容を確認して追加してください。';
   }
 
-  area.innerHTML = candidates.map(function (c) {
+  const pendingCount = candidates.filter(function (c) { return c.status !== 'accepted'; }).length;
+  const bulkBar = pendingCount >= 2
+    ? '<div class="bulk-bar">' +
+      '<button type="button" id="bulkAdd">まとめて ' + pendingCount + ' 品を登録</button>' +
+      '<span class="form-message" id="bulkMessage"></span></div>'
+    : '';
+
+  area.innerHTML = bulkBar + candidates.map(function (c) {
     if (c.status === 'accepted') {
       return '<div class="cand-done">✓ ' + esc(c.corrected_name || c.detected_name) + ' は登録済みです</div>';
     }
@@ -1478,7 +1804,7 @@ function renderCandidates(candidates, model) {
     const note = c.expiry_source === 'printed'
       ? '📅 パッケージの印字から読み取りました'
       : (c.expiry_source === 'estimated'
-        ? '💡 一般的な日持ちからの目安です。必要なら直してください'
+        ? '💡 一般的な日持ちより少し早めの、余裕をもたせた目安です。必要なら直してください'
         : '目安の日付です。確認してください');
 
     return '<div class="cand-card" data-id="' + esc(c.id) + '">' +
@@ -1516,28 +1842,86 @@ function renderCandidates(candidates, model) {
       scanExpiryInto(card.querySelector('.c-exp'), card.querySelector('.c-note'));
     };
   });
+
+  const bulkBtn = $('bulkAdd');
+  if (bulkBtn) bulkBtn.onclick = confirmAllCandidates;
 }
 
-async function confirmCandidate(id, card) {
+/**
+ * 候補カードの入力値から確定APIへ送るボディを組み立てる。
+ * confirmCandidate（個別）と confirmAllCandidates（一括）で共有する。
+ */
+function candidateBody(card) {
+  return {
+    display_name: card.querySelector('.c-name').value.trim(),
+    category: card.querySelector('.c-cat').value,
+    quantity: Number(card.querySelector('.c-qty').value),
+    unit: card.querySelector('.c-unit').value.trim(),
+    expires_on: card.querySelector('.c-exp').value,
+  };
+}
+
+/**
+ * 候補を1件確定する。
+ * silent=true のときは在庫の再読み込み・トースト表示を呼び出し側に任せる
+ * （一括登録で1件ごとに画面更新するのを避けるため）。
+ */
+async function confirmCandidate(id, card, silent) {
   const button = card.querySelector('.add');
-  button.disabled = true;
+  if (button) button.disabled = true;
   try {
     const d = await api('/recognition-candidates/' + id + '/confirm', {
       method: 'POST',
-      json: {
-        display_name: card.querySelector('.c-name').value.trim(),
-        category: card.querySelector('.c-cat').value,
-        quantity: Number(card.querySelector('.c-qty').value),
-        unit: card.querySelector('.c-unit').value.trim(),
-        expires_on: card.querySelector('.c-exp').value,
-      },
+      json: candidateBody(card),
     });
     card.outerHTML = '<div class="cand-done">✓ ' + esc(d.inventory_lot.display_name) + ' を登録しました</div>';
-    toast(d.inventory_lot.display_name + 'を在庫に追加しました');
-    await refreshAll();
+    if (!silent) {
+      toast(d.inventory_lot.display_name + 'を在庫に追加しました');
+      await refreshAll();
+    }
+    return { ok: true, name: d.inventory_lot.display_name };
   } catch (e) {
-    button.disabled = false;
-    toast(e.message, true);
+    if (button) button.disabled = false;
+    if (!silent) toast(e.message, true);
+    return { ok: false, name: card.querySelector('.c-name').value.trim(), error: e.message };
+  }
+}
+
+/** 表示中の候補カードをまとめて確定する。 */
+async function confirmAllCandidates() {
+  const area = $('candidates');
+  if (!area) return;
+  const cards = [...area.querySelectorAll('.cand-card')];
+  if (!cards.length) return;
+
+  const bulkBtn = $('bulkAdd');
+  const bulkMsg = $('bulkMessage');
+  if (bulkBtn) bulkBtn.disabled = true;
+  if (bulkMsg) bulkMsg.textContent = '登録しています…';
+
+  const results = [];
+  for (const card of cards) {
+    // ループ中に前の候補がDOMから消えている可能性は無い（各カードは自分自身のidを保持）
+    const id = card.getAttribute('data-id');
+    results.push(await confirmCandidate(id, card, true));
+  }
+
+  const okCount = results.filter(function (r) { return r.ok; }).length;
+  const failed = results.filter(function (r) { return !r.ok; });
+
+  if (bulkBtn) bulkBtn.remove();
+  if (bulkMsg) {
+    bulkMsg.textContent = failed.length
+      ? okCount + '品を登録しました（' + failed.length + '品は失敗: ' + failed.map(function (f) { return f.name; }).join('・') + '）'
+      : '';
+  }
+
+  if (okCount > 0) {
+    toast(okCount + '品を在庫に追加しました');
+    await refreshAll();
+  }
+  if (failed.length) {
+    toast(failed.length + '品の登録に失敗しました。内容を確認してもう一度お試しください', true);
   }
 }
 
@@ -1712,6 +2096,7 @@ $('household').onchange = function (e) {
   state.household = e.target.value;
   localStorage.setItem('hid', state.household);
   state.category = '';
+  state.selected.clear();
   refreshAll();
 };
 
@@ -1731,9 +2116,17 @@ $('search').oninput = function (e) {
   renderInventory();
 };
 
-$('recipeBtn').onclick = openRecipes;
-$('wasteRecipeBtn').onclick = openRecipes;
+$('recipeBtn').onclick = function () { openRecipes(); };
+$('wasteRecipeBtn').onclick = function () { openRecipes(); };
 $('dockAdd').onclick = openAddModal;
+
+$('selectClear').onclick = function () {
+  state.selected.clear();
+  renderInventory();
+};
+$('selectRecipe').onclick = function () {
+  openRecipes(Array.from(state.selected));
+};
 
 $('notifyBtn').onclick = function () {
   const urgent = urgentItems();
@@ -1741,6 +2134,7 @@ $('notifyBtn').onclick = function () {
   toast(urgent.map(function (i) { return i.display_name + '（' + expiryLabel(i) + '）'; }).join('、'));
 };
 
+initHistoryToggle();
 render();
 loadHouseholds().catch(function (e) {
   state.loading = false;
