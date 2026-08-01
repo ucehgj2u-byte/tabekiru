@@ -1,9 +1,27 @@
 import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test';
-import app from '../src/index';
+import { createDb } from '../src/db/client';
+import { app } from '../src/index';
+import { findOrCreateUserByEmail, signSessionToken } from '../src/services/authService';
+
+/**
+ * テスト用の "user key" 文字列(例: 'user-a')から、本物のログインフロー
+ * （マジックリンク送信→クリック）を経由せずに直接セッションJWTを発行する。
+ * `${key}@example.local` をそのユーザーのメールアドレスとして扱う
+ * （旧・簡易認証時代の `<token>@example.local` の既定メールと同じ形にして
+ * 既存テストのアサーションをそのまま活かしている）。
+ * key に '@' が含まれる場合はメールアドレスそのものとして扱う
+ * （招待済みメンバーが本人のメールでログインするケースをテストするため）。
+ */
+async function sessionTokenFor(key: string): Promise<string> {
+  const email = key.includes('@') ? key : `${key}@example.local`;
+  const db = createDb(env.DB);
+  const user = await findOrCreateUserByEmail(db, email);
+  return await signSessionToken(env, user);
+}
 
 /**
  * テスト用のリクエストヘルパー。
- * token をそのまま Bearer トークン（= auth_user_id）として送る。
+ * token には任意の "user key" 文字列を渡す（内部でセッションJWTに変換してBearerに載せる）。
  */
 export async function api(
   path: string,
@@ -11,7 +29,7 @@ export async function api(
 ): Promise<Response> {
   const { token = 'user-a', ...rest } = init;
   const headers = new Headers(rest.headers);
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  if (token) headers.set('Authorization', `Bearer ${await sessionTokenFor(token)}`);
   if (typeof rest.body === 'string' && !headers.has('content-type')) {
     headers.set('content-type', 'application/json');
   }

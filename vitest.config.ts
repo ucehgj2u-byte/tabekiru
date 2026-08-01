@@ -15,10 +15,14 @@ export default defineConfig(async () => {
         miniflare: {
           bindings: {
             TEST_MIGRATIONS: migrations,
-            // テストではGemini呼び出しを fetchMock で差し替えるためダミーで良い
+            // テストではGemini/Resend呼び出しを fetchMock で差し替えるためダミーで良い
             GEMINI_API_KEY: 'test-api-key',
             GEMINI_MODEL: 'gemini-3-flash-preview',
             PHOTO_URL_SECRET: 'test-photo-secret',
+            RESEND_API_KEY: 'test-resend-key',
+            NOTIFY_FROM_EMAIL: 'onboarding@resend.dev',
+            NOTIFY_EXPIRING_WITHIN_DAYS: '3',
+            AUTH_JWT_SECRET: 'test-jwt-secret',
           },
         },
       }),

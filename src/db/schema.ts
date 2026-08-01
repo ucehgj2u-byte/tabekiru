@@ -24,6 +24,24 @@ export const users = sqliteTable('users', {
   createdAt: text('created_at').notNull().default(nowUtc),
 });
 
+/**
+ * マジックリンクログイン用のワンタイムトークン。
+ * 生トークンは保存せず、SHA-256ハッシュのみを保存する（DB漏洩時の悪用を防ぐため）。
+ */
+export const magicLinkTokens = sqliteTable(
+  'magic_link_tokens',
+  {
+    id: text('id').primaryKey(),
+    email: text('email').notNull(),
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: text('expires_at').notNull(),
+    /** 使用済みなら日時が入る。二重使用を防ぐため一度でも使ったら再利用不可にする */
+    consumedAt: text('consumed_at'),
+    createdAt: text('created_at').notNull().default(nowUtc),
+  },
+  (t) => [index('magic_link_tokens_token_hash_idx').on(t.tokenHash)],
+);
+
 export const households = sqliteTable('households', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
@@ -224,6 +242,7 @@ export const recipeSuggestions = sqliteTable(
   ],
 );
 
+export type MagicLinkToken = typeof magicLinkTokens.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Household = typeof households.$inferSelect;
 export type HouseholdMember = typeof householdMembers.$inferSelect;

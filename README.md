@@ -72,7 +72,40 @@ npx wrangler secret put GEMINI_API_KEY
 npx wrangler secret put PHOTO_URL_SECRET
 ```
 
-### 5. マイグレーションの適用
+### 5. Resend APIキーの設定（期限通知メール）
+
+[Resend](https://resend.com/api-keys) でAPIキーを発行し、Gemini同様に
+`.dev.vars`（ローカル）/ `wrangler secret`（本番）で管理します。
+
+ローカル（`.dev.vars` に追記）:
+
+```
+RESEND_API_KEY="your-resend-api-key-here"
+```
+
+本番:
+
+```bash
+npx wrangler secret put RESEND_API_KEY
+```
+
+送信元アドレスは既定で Resend のドメイン検証不要アドレス
+（`onboarding@resend.dev`）を使います。自ドメインで送りたい場合は
+Resendでドメインを検証し、`wrangler.toml` の `NOTIFY_FROM_EMAIL` を差し替えてください。
+
+### 6. セッションJWTの署名鍵の設定（ログイン）
+
+マジックリンクログインで発行するセッションJWTの署名鍵です。
+`wrangler.toml` の `AUTH_JWT_SECRET` に開発用の既定値が入っているので、ローカル開発では
+何もしなくても動きます。**本番では必ず上書きしてください**（推測されると誰でも
+セッションJWTを偽造できてしまうため）。
+
+```bash
+# ランダムな鍵を生成して登録する例
+openssl rand -hex 32 | npx wrangler secret put AUTH_JWT_SECRET
+```
+
+### 7. マイグレーションの適用
 
 ローカル:
 
@@ -88,7 +121,7 @@ npm run db:migrate:remote
 
 `migrations/0002_seed_food_catalog.sql` で食材カタログの初期データ（36件）も投入されます。
 
-### 6. 開発サーバーの起動
+### 8. 開発サーバーの起動
 
 ```bash
 npm run dev
@@ -120,11 +153,11 @@ npm run dev
 - 写真を使わない**手入力**での追加
 - 期限が近い食材を使う**レシピ提案**（手順つき）
 - **使いきれた記録** — 使いきった量・捨てた量・使いきれた割合と操作履歴
-- 家庭の作成と切り替え、ユーザーの切り替え
+- 家庭の作成と切り替え
+- **マジックリンクログイン** — メールアドレスを入力してログインリンクを受け取り、クリックしてログイン
 
-利用者の識別子は初回訪問時に自動生成してブラウザに保存するため、通常は意識する必要がありません。
-家族で分けたい場合は右上の 👤 ボタンから切り替えられます
-（この文字列がそのまま `Authorization: Bearer <token>` として送られます）。
+未ログイン時はログイン画面が表示されます。メールアドレスを送信すると届くリンクをクリックすると
+セッションが `localStorage` に保存されてアプリに戻ります（右上の「ログアウト」でいつでもログアウトできます）。
 
 フロントエンドを別途実装する場合も、このファイルがAPIの呼び出し例として使えます。
 
@@ -190,20 +223,35 @@ npm run deploy
 
 ---
 
-## 認証（MVPの簡易版）
+## 認証（マジックリンクログイン）
 
-すべての業務APIは `Authorization: Bearer <token>` を要求します。
-MVPではトークンをそのまま `users.auth_user_id` として扱い、**未登録なら自動でユーザーを作成**します。
-本番ではこのミドルウェア（[src/middleware/auth.ts](src/middleware/auth.ts)）をOAuth/JWT検証に差し替えてください。
+すべての業務APIは `Authorization: Bearer <session JWT>` を要求します。
+セッションJWTは以下の2ステップ（マジックリンクログイン）で取得します。
+
+1. `POST /auth/magic-link` にメールアドレスを送ると、ログイン用リンク付きのメールが届く
+2. メール内のリンク（`GET /auth/verify?token=...`）をクリックすると、セッションJWT（30日間有効）が
+   発行され、ブラウザの `localStorage` に保存されて `/` に戻る
+
+未登録のメールアドレスでログインすると、そのメールアドレスで新規ユーザーが自動作成されます
+（これがそのままサインアップになります）。
 
 ```bash
-curl http://127.0.0.1:8787/me -H "Authorization: Bearer demo-user"
+# 1. ログインリンクを送る
+curl -X POST http://127.0.0.1:8787/auth/magic-link \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com"}'
+
+# 2. メール内のリンクをクリック、またはcurlでJSON取得（Accept: application/jsonの場合）
+curl "http://127.0.0.1:8787/auth/verify?token=<メール内のtoken>" -H "Accept: application/json"
+# => { "token": "<セッションJWT>", "user": {...} }
+
+# 3. 以降はこのJWTをBearerトークンとして使う
+curl http://127.0.0.1:8787/me -H "Authorization: Bearer <セッションJWT>"
 ```
 
-初回作成時のみ、任意ヘッダでプロフィールを指定できます。
-
-- `X-User-Email`（省略時 `<token>@example.local`）
-- `X-User-Display-Name`（省略時 `<token>`）
+マジックリンクのトークンは15分間・1回のみ有効です（[src/services/authService.ts](src/services/authService.ts)）。
+生のトークンはDBに保存せず、SHA-256ハッシュのみを保存します。
+セッションJWTの署名鍵は環境変数 `AUTH_JWT_SECRET`（本番は `wrangler secret put AUTH_JWT_SECRET` で設定）。
 
 household配下のリソースには、**そのhouseholdの `active` メンバーだけ**がアクセスできます
 （`invited` のままではアクセスできません）。
@@ -227,7 +275,17 @@ household配下のリソースには、**そのhouseholdの `active` メンバ�
 | 409 | 状態の競合（消費済み在庫の再操作など） |
 | 422 | 形式は正しいが業務ルール違反（残量超過など） |
 | 429 | Gemini APIのレート制限 |
-| 502 | Gemini API呼び出し失敗 |
+| 502 | Gemini / Resend API呼び出し失敗 |
+
+### auth
+
+| メソッド | パス | 説明 |
+| --- | --- | --- |
+| POST | `/auth/magic-link` | ログイン用リンクをメールで送る（`{ email }`、認証不要） |
+| GET | `/auth/verify?token=...` | リンクを検証してセッションJWTを発行（認証不要） |
+
+`GET /auth/verify` は通常のブラウザアクセスには `localStorage` に保存して `/` に戻るHTMLを、
+`Accept: application/json` の場合は `{ token, user }` のJSONを返します。
 
 ### households
 
@@ -340,6 +398,21 @@ household配下のリソースには、**そのhouseholdの `active` メンバ�
 残量を超える数量を送っても400にはせず残量まで丸め、一部の食材が消費済み等で失敗しても他の食材の
 消費は続行し、`consumed` / `failed` の内訳を返します。
 
+### notifications（期限が近い食材のメール通知）
+
+| メソッド | パス | 説明 |
+| --- | --- | --- |
+| POST | `/households/:id/notifications/expiring-check?within_days=3` | 期限が近い在庫があれば、householdのactiveメンバー全員にメールを送る |
+
+`within_days`（既定3日、環境変数 `NOTIFY_EXPIRING_WITHIN_DAYS` の既定値）以内に期限が来る
+（既に切れているものを含む） `active` な在庫をまとめ、1household・1通のメールで送ります。
+対象が無い、またはactiveメンバーが居ない場合は何も送らず `{ "sent": false }` を返します。
+
+本番では [triggers] crons（`wrangler.toml`、既定 毎日 JST 8:00）から
+`src/index.ts` の `scheduled` ハンドラが全household分をまとめて自動実行します
+（`runExpiryNotifications`、1householdの送信失敗は他householdの処理を止めません）。
+このAPIは動作確認・デモ用に単一household分だけ即時実行するためのものです。
+
 ---
 
 ## Gemini API の使い方
@@ -395,6 +468,24 @@ household配下のリソースには、**そのhouseholdの `active` メンバ�
 
 ---
 
+## Resend API の使い方（期限通知メール）
+
+呼び出しは [src/lib/resendClient.ts](src/lib/resendClient.ts) に集約し、
+[notificationService](src/services/notificationService.ts) が対象の集計・メール本文の組み立て・
+送信をまとめています。
+
+- エンドポイント: `https://api.resend.com/emails`（`Authorization: Bearer <RESEND_API_KEY>`）
+- 送信元は環境変数 `NOTIFY_FROM_EMAIL`（既定 `onboarding@resend.dev`。自ドメイン検証をすれば
+  そのアドレスに差し替え可能）。
+- しきい値は環境変数 `NOTIFY_EXPIRING_WITHIN_DAYS`（既定3日）。
+- 呼び出し元は2つ:
+  - `POST /households/:id/notifications/expiring-check`（手動・単一household・デモ用）
+  - `scheduled`（cron、`wrangler.toml` の `[triggers] crons`、全household・毎日自動）
+- APIキー未設定・Resendのエラー応答はいずれも `ResendError` にまとめ、cron側では
+  household単位でcatchして他householdの処理を止めないようにしています。
+
+---
+
 ## データモデルの方針
 
 - **household（家庭）** を中心単位とし、複数ユーザーが1つのhouseholdに所属します。
@@ -420,6 +511,7 @@ src/
     schema.ts               Drizzleスキーマ定義
     client.ts               D1クライアント初期化
   routes/
+    auth.ts                 マジックリンクログイン
     households.ts           household作成・詳細・メンバー
     storageLocations.ts     保存場所
     foodCatalog.ts          食材カタログ検索
@@ -428,16 +520,20 @@ src/
     inventory.ts            在庫CRUD・消費・廃棄
     events.ts               履歴・集計
     recipes.ts              レシピ提案
+    notifications.ts        期限が近い食材のメール通知（手動実行API）
   services/
+    authService.ts          マジックリンク発行・検証・セッションJWT
     recognitionService.ts   Gemini画像認識
     recipeService.ts        Geminiレシピ提案
     inventoryService.ts     在庫ロット生成・イベント追記
     r2Service.ts            R2アップロード/取得/署名付きURL
+    notificationService.ts  期限通知の対象集計・メール送信（cron本体）
   middleware/
-    auth.ts                 簡易認証
+    auth.ts                 セッションJWTの検証
     snakeCase.ts            レスポンスキーのsnake_case化
   lib/
     geminiClient.ts         Gemini API呼び出しの共通ラッパー
+    resendClient.ts         Resend API呼び出しの共通ラッパー
     validators.ts           Zodスキーマとパースヘルパー
     access.ts               householdメンバーシップの検証
     errors.ts               ApiErrorとエラーハンドラ
@@ -457,13 +553,13 @@ npm test
 ```
 
 Miniflare上で実サーバーと同じD1/R2バインディングを使い、
-マイグレーション適用済みのDBに対して53件の統合テストを実行します。
-Gemini APIの呼び出しは `vi.stubGlobal('fetch', ...)` で差し替えているため、
+マイグレーション適用済みのDBに対して統合テストを実行します。
+Gemini / Resend の呼び出しは `vi.stubGlobal('fetch', ...)` で差し替えているため、
 実際のAPIキーやネットワークは不要です。
 
 カバーしている主なシナリオ:
 
-- 認証（401、トークンからのユーザー自動作成）
+- マジックリンクログイン（送信、検証、トークンの再利用防止、期限切れ、不正なJWT）
 - household作成・メンバー追加・権限（403、owner限定操作、invited状態）
 - 保存場所、食材カタログ検索（表記ゆれの正規化を含む）
 - 在庫の登録・期限順ソート・フィルタ・修正・消費・廃棄と各イベントの記録
@@ -471,6 +567,7 @@ Gemini APIの呼び出しは `vi.stubGlobal('fetch', ...)` で差し替えてい
 - 画像アップロード → R2保存 → 署名付きURLでの取得、署名改竄時の挙動
 - 画像認識ジョブの成功／429／JSONパース失敗、候補の修正と確定→在庫登録
 - レシピ提案（プロンプトへの食材リスト埋め込みとレート制限時の429）
+- 期限通知メール（対象の有無、`within_days`、権限、cron本体の複数household処理）
 
 ---
 
@@ -481,4 +578,9 @@ npm run deploy
 ```
 
 デプロイ前に、本番D1へのマイグレーション適用（`npm run db:migrate:remote`）と
-シークレット登録（`GEMINI_API_KEY`, `PHOTO_URL_SECRET`）を済ませてください。
+シークレット登録（`GEMINI_API_KEY`, `PHOTO_URL_SECRET`, `RESEND_API_KEY`, `AUTH_JWT_SECRET`）を
+済ませてください。`AUTH_JWT_SECRET` は開発用の既定値のままデプロイしないよう特に注意してください
+（誰でもセッションJWTを偽造できてしまいます）。
+
+期限通知メールの cron（`wrangler.toml` の `[triggers] crons`）は `wrangler deploy` 時に
+自動で登録されます。

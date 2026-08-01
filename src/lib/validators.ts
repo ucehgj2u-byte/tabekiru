@@ -1,5 +1,6 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
+import { DEFAULT_EXPIRING_WITHIN_DAYS } from '../services/notificationService';
 import { FOOD_CATEGORIES } from './categories';
 import { ApiError } from './errors';
 
@@ -24,6 +25,14 @@ const positiveQuantity = z
   .number()
   .finite()
   .positive('数量は0より大きい値を指定してください');
+
+/* -------------------------------------------------------------------------- */
+/* auth                                                                        */
+/* -------------------------------------------------------------------------- */
+
+export const magicLinkRequestSchema = z.object({
+  email: z.email('メールアドレスの形式が正しくありません'),
+});
 
 /* -------------------------------------------------------------------------- */
 /* households                                                                  */
@@ -192,6 +201,14 @@ export const recipeConsumeSchema = z.object({
     )
     .min(1)
     .max(30),
+});
+
+/* -------------------------------------------------------------------------- */
+/* notifications                                                               */
+/* -------------------------------------------------------------------------- */
+
+export const expiringCheckQuerySchema = z.object({
+  within_days: z.coerce.number().int().min(0).max(365).default(DEFAULT_EXPIRING_WITHIN_DAYS),
 });
 
 /* -------------------------------------------------------------------------- */

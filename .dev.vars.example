@@ -6,3 +6,6 @@ GEMINI_API_KEY="your-gemini-api-key-here"
 
 # 任意: モデルを上書きしたい場合（未指定なら wrangler.toml の GEMINI_MODEL）
 # GEMINI_MODEL="gemini-3.1-flash-lite"
+
+# 期限が近い食材のメール通知（Resend, https://resend.com/api-keys で発行）
+RESEND_API_KEY="your-resend-api-key-here"

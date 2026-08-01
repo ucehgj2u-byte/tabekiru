@@ -746,6 +746,10 @@ button { color: inherit; }
 
 .ask-actions .ok { border-color: var(--leaf); color: white; background: var(--leaf); }
 
+.login-card .login-desc { margin: 0 0 16px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.login-card .login-status { margin: 14px 0 0; font-size: 13px; color: var(--leaf); font-weight: 700; }
+.login-card .ask-actions { grid-template-columns: 1fr; }
+
 .household-select {
   min-height: 44px; padding: 0 12px; border: 1px solid var(--line);
   border-radius: 14px; background: var(--paper); cursor: pointer;
@@ -797,6 +801,20 @@ button { color: inherit; }
 </head>
 <body>
 
+<div class="modal-backdrop" id="loginGate" hidden>
+  <div class="ask-modal login-card">
+    <h3>ログイン</h3>
+    <p class="login-desc">メールアドレスを入力すると、ログイン用のリンクをメールでお送りします。届いたリンクをクリックするとログインできます。</p>
+    <form id="loginForm">
+      <input type="email" id="loginEmail" placeholder="you@example.com" required autocomplete="email">
+      <div class="ask-actions">
+        <button type="submit" class="ok" id="loginSubmit">リンクを送る</button>
+      </div>
+    </form>
+    <p class="login-status" id="loginStatus" hidden></p>
+  </div>
+</div>
+
 <main class="app-shell">
   <header class="topbar">
     <a class="brand" href="#" aria-label="Mogu ホーム">
@@ -815,7 +833,7 @@ button { color: inherit; }
           <strong id="userName">ユーザー</strong>
           <small>ログイン中</small>
         </div>
-        <button id="switchUser" title="ユーザーを切り替える">切替</button>
+        <button id="switchUser" title="ログアウト">ログアウト</button>
       </div>
     </div>
   </header>
@@ -900,7 +918,9 @@ button { color: inherit; }
 <script>
 /* =========================================================================
    バックエンドは既存の Hono API をそのまま使う。
-   認証は Authorization: Bearer <token>（初回訪問時に自動生成して保存）。
+   認証はマジックリンクログイン。POST /auth/magic-link でメールを送り、
+   届いたリンク（GET /auth/verify）をクリックすると localStorage に
+   セッションJWTが保存されて `/` に戻ってくる（src/routes/auth.ts 参照）。
    ========================================================================= */
 
 const $ = (id) => document.getElementById(id);
@@ -941,17 +961,30 @@ const state = {
 /* ---------------------------------------------------------------- 共通 --- */
 
 function token() {
-  let t = localStorage.getItem('token');
-  if (!t) {
-    t = 'user-' + Math.random().toString(36).slice(2, 10);
-    localStorage.setItem('token', t);
-  }
-  return t;
+  return localStorage.getItem('token') || '';
+}
+
+function showLoginGate() {
+  $('loginGate').hidden = false;
+  document.querySelector('.app-shell').hidden = true;
+}
+
+function hideLoginGate() {
+  $('loginGate').hidden = true;
+  document.querySelector('.app-shell').hidden = false;
+}
+
+function logout() {
+  localStorage.removeItem('token');
+  localStorage.removeItem('hid');
+  showLoginGate();
 }
 
 async function api(path, options) {
   options = options || {};
-  const headers = Object.assign({ Authorization: 'Bearer ' + token() }, options.headers || {});
+  const t = token();
+  const headers = Object.assign({}, options.headers || {});
+  if (t) headers.Authorization = 'Bearer ' + t;
   if (options.json !== undefined) {
     headers['Content-Type'] = 'application/json';
     options.body = JSON.stringify(options.json);
@@ -960,6 +993,10 @@ async function api(path, options) {
   const text = await res.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch (e) { data = null; }
+  if (res.status === 401 && t) {
+    // セッションが無効・期限切れ。ログイン画面に戻す。
+    logout();
+  }
   if (!res.ok) {
     const msg = (data && data.error && data.error.message) || ('エラー ' + res.status);
     const detail = data && data.error && data.error.details
@@ -1071,12 +1108,16 @@ function ask(title, defaultValue, type) {
 /* ------------------------------------------------------------ household --- */
 
 async function loadHouseholds() {
+  const me = await api('/me');
+  state.user = me.user;
+  const label = state.user.display_name || state.user.email;
+  $('userName').textContent = label;
+  $('userInitial').textContent = label.slice(0, 1).toUpperCase();
+
   const data = await api('/households');
   state.households = data.households;
 
   const select = $('household');
-  $('userName').textContent = token();
-  $('userInitial').textContent = token().replace(/^user-/, '').slice(0, 1).toUpperCase();
 
   if (!state.households.length) {
     select.innerHTML = '<option>（家庭がありません）</option>';
@@ -2241,13 +2282,26 @@ $('household').onchange = function (e) {
 
 $('newHousehold').onclick = createHousehold;
 
-$('switchUser').onclick = async function () {
-  const next = await ask('ユーザー名（家族で分けたい時に変更します）', token());
-  if (!next || !next.trim()) return;
-  localStorage.setItem('token', next.trim());
-  localStorage.removeItem('hid');
-  toast(next.trim() + ' として使います');
-  loadHouseholds().catch(function (e) { toast(e.message, true); });
+$('switchUser').onclick = function () {
+  logout();
+  toast('ログアウトしました');
+};
+
+$('loginForm').onsubmit = async function (e) {
+  e.preventDefault();
+  const email = $('loginEmail').value.trim();
+  if (!email) return;
+  $('loginSubmit').disabled = true;
+  $('loginStatus').hidden = true;
+  try {
+    await api('/auth/magic-link', { method: 'POST', json: { email: email } });
+    $('loginStatus').textContent = email + ' 宛にログイン用リンクを送りました。メールを確認してください。';
+    $('loginStatus').hidden = false;
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    $('loginSubmit').disabled = false;
+  }
 };
 
 $('search').oninput = function (e) {
@@ -2274,12 +2328,17 @@ $('notifyBtn').onclick = function () {
 };
 
 initHistoryToggle();
-render();
-loadHouseholds().catch(function (e) {
-  state.loading = false;
+
+if (!token()) {
+  showLoginGate();
+} else {
   render();
-  toast(e.message, true);
-});
+  loadHouseholds().catch(function (e) {
+    state.loading = false;
+    render();
+    toast(e.message, true);
+  });
+}
 </script>
 </body>
 </html>

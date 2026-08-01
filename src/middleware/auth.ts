@@ -4,22 +4,17 @@ import { createDb, type Db } from '../db/client';
 import { users, type User } from '../db/schema';
 import { ApiError } from '../lib/errors';
 import { newId } from '../lib/id';
+import { verifySessionToken } from '../services/authService';
 import type { AppEnv } from '../types';
 
 /**
- * ハッカソンMVP向けの簡易認証。
+ * マジックリンクログインで発行したセッションJWTによる認証。
  *
- *   Authorization: Bearer <token>
+ *   Authorization: Bearer <session JWT>
  *
- * の <token> をそのまま users.auth_user_id として扱い、
- * 未登録なら自動でユーザーを作成する（本番はOAuth/JWT検証に差し替える）。
- *
- * 初回作成時のみ、以下のヘッダでプロフィールを指定できる:
- *   X-User-Email        (省略時は <token>@example.local)
- *   X-User-Display-Name (省略時は <token>)
+ * JWTは POST /auth/magic-link → GET /auth/verify で取得する（src/routes/auth.ts）。
+ * ここでは署名・有効期限を検証し、payload.sub(=users.id) からユーザーを読み込む。
  */
-
-const TOKEN_PATTERN = /^[A-Za-z0-9._:@-]{3,128}$/;
 
 /** D1バインディングからDrizzleクライアントを作って c.set('db') する。 */
 export const dbMiddleware: MiddlewareHandler<AppEnv> = async (c, next) => {
@@ -32,23 +27,20 @@ export const authMiddleware: MiddlewareHandler<AppEnv> = async (c, next) => {
   const match = /^Bearer\s+(.+)$/i.exec(header.trim());
   if (!match) {
     throw ApiError.unauthorized(
-      'Authorization: Bearer <token> ヘッダが必要です',
+      'Authorization: Bearer <session token> ヘッダが必要です。POST /auth/magic-link でログインしてください',
     );
   }
 
-  const token = match[1].trim();
-  if (!TOKEN_PATTERN.test(token)) {
-    throw ApiError.unauthorized('トークンの形式が不正です');
+  const db = c.get('db') ?? createDb(c.env.DB);
+  const payload = await verifySessionToken(c.env, match[1].trim());
+
+  const rows = await db.select().from(users).where(eq(users.id, payload.sub)).limit(1);
+  if (rows.length === 0) {
+    throw ApiError.unauthorized('セッションが無効です。再度ログインしてください');
   }
 
-  const db = c.get('db') ?? createDb(c.env.DB);
-  const user = await getOrCreateUser(db, token, {
-    email: c.req.header('X-User-Email'),
-    displayName: c.req.header('X-User-Display-Name'),
-  });
-
   c.set('db', db);
-  c.set('user', user);
+  c.set('user', rows[0]);
   await next();
 };
 

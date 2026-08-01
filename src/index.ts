@@ -1,13 +1,16 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
+import { createDb } from './db/client';
 import { ApiError, errorHandler } from './lib/errors';
 import { authMiddleware, dbMiddleware } from './middleware/auth';
 import { snakeCaseResponse } from './middleware/snakeCase';
+import { authRoute } from './routes/auth';
 import { eventsRoute } from './routes/events';
 import { foodCatalogRoute } from './routes/foodCatalog';
 import { householdsRoute } from './routes/households';
 import { householdInventoryRoute, inventoryRoute } from './routes/inventory';
+import { householdNotificationsRoute } from './routes/notifications';
 import { householdPhotosRoute, photoContentRoute, photosRoute } from './routes/photos';
 import {
   photoRecognizeRoute,
@@ -16,21 +19,23 @@ import {
 } from './routes/recognition';
 import { recipesRoute } from './routes/recipes';
 import { storageLocationsRoute } from './routes/storageLocations';
-import type { AppEnv } from './types';
+import { runExpiryNotifications } from './services/notificationService';
+import type { AppEnv, Bindings } from './types';
 // 動作確認用の簡易GUI（wrangler.toml の Text ルールで文字列として取り込む）
 import appHtml from './ui/app.html';
 
 /**
  * 食品ロス削減アプリ バックエンド（Cloudflare Workers + Hono）
  *
- * 認証: Authorization: Bearer <token>（MVPの簡易認証。middleware/auth.ts 参照）
+ * 認証: マジックリンクログイン（POST /auth/magic-link → GET /auth/verify）で
+ * 発行したセッションJWTを Authorization: Bearer <JWT> で送る。middleware/auth.ts 参照。
  */
 const app = new Hono<AppEnv>();
 
 app.use('*', logger());
 app.use('*', cors({
   origin: '*',
-  allowHeaders: ['Authorization', 'Content-Type', 'X-User-Email', 'X-User-Display-Name'],
+  allowHeaders: ['Authorization', 'Content-Type'],
   allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   maxAge: 86400,
 }));
@@ -53,6 +58,9 @@ app.get('/health', (c) =>
     time: new Date().toISOString(),
   }),
 );
+
+/** マジックリンクログイン（認証不要） */
+app.route('/auth', authRoute);
 
 /**
  * 画像本体の配信。署名付きURLでも参照できるよう、認証必須ルートより先に登録する。
@@ -81,6 +89,7 @@ app.route('/households', householdPhotosRoute);
 app.route('/households', householdInventoryRoute);
 app.route('/households', eventsRoute);
 app.route('/households', recipesRoute);
+app.route('/households', householdNotificationsRoute);
 
 app.route('/photos', photosRoute);
 app.route('/photos', photoRecognizeRoute);
@@ -90,4 +99,18 @@ app.route('/recognition-candidates', recognitionCandidatesRoute);
 app.route('/inventory', inventoryRoute);
 app.route('/food-catalog', foodCatalogRoute);
 
-export default app;
+/** テストでは `app.request(...)` を直接使うため named export も残す。 */
+export { app };
+
+export default {
+  fetch: app.fetch,
+  /**
+   * 期限が近い食材のメール通知（wrangler.toml の [triggers] crons で毎日実行）。
+   * household単位の送信失敗は runExpiryNotifications 内でログに残しつつ継続する。
+   */
+  async scheduled(_controller: ScheduledController, env: Bindings, _ctx: ExecutionContext) {
+    const db = createDb(env.DB);
+    const result = await runExpiryNotifications(db, env);
+    console.log('[scheduled] expiring-check', result);
+  },
+} satisfies ExportedHandler<Bindings>;

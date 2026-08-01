@@ -17,10 +17,15 @@ describe('認証', () => {
     expect(body.error.code).toBe('unauthorized');
   });
 
-  it('トークンからユーザーが自動作成される', async () => {
+  it('初回ログインでユーザーが自動作成される', async () => {
     const { status, body } = await apiJson('/me', { token: 'user-me' });
     expect(status).toBe(200);
-    expect(body.user.auth_user_id ?? body.user.authUserId).toBe('user-me');
+    expect(body.user.email).toBe('user-me@example.local');
+  });
+
+  it('不正なBearerトークンは401', async () => {
+    const res = await api('/households', { token: null, headers: { Authorization: 'Bearer not-a-real-jwt' } });
+    expect(res.status).toBe(401);
   });
 });
 
@@ -93,7 +98,7 @@ describe('households', () => {
 
     // 招待されたユーザーが同じメールでログインすると閲覧できる
     const viewed = await apiJson(`/households/${householdId}`, {
-      token: 'invite:partner@example.com',
+      token: 'partner@example.com',
     });
     expect(viewed.status).toBe(200);
     expect(viewed.body.members).toHaveLength(2);
@@ -108,7 +113,7 @@ describe('households', () => {
     });
 
     const { status, body } = await apiJson(`/households/${householdId}`, {
-      token: 'invite:pending@example.com',
+      token: 'pending@example.com',
     });
     expect(status).toBe(403);
     expect(body.error.message).toContain('招待中');

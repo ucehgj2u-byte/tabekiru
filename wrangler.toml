@@ -8,8 +8,11 @@ rules = [{ type = "Text", globs = ["**/*.html"], fallthrough = true }]
 
 # ----------------------------------------------------------------------------
 # 環境変数（シークレットではない値のみ）
-#   GEMINI_API_KEY はここに書かず、`wrangler secret put GEMINI_API_KEY`
-#   （ローカルは .dev.vars）で管理する。
+#   GEMINI_API_KEY / RESEND_API_KEY / PHOTO_URL_SECRET / AUTH_JWT_SECRET はここに書かず、
+#   `wrangler secret put <NAME>`（ローカルは .dev.vars）で管理する。
+#   [vars] に書くと `wrangler deploy` のたびに同名のシークレットを上書きしてしまうため、
+#   本物のシークレット系の値は絶対に [vars] に置かない（ここは開発用の既定値がコード側
+#   （resendClient.ts / r2Service.ts / authService.ts）に入っているので未設定でも動く）。
 # ----------------------------------------------------------------------------
 [vars]
 # 画像認識・レシピ提案で使うモデル。
@@ -17,9 +20,19 @@ rules = [{ type = "Text", globs = ["**/*.html"], fallthrough = true }]
 #    実際に呼べる `gemini-3-flash-preview` を指定している。
 #    無料枠のレート制限に当たる場合は gemini-3.1-flash-lite に切り替える。
 GEMINI_MODEL = "gemini-3-flash-preview"
-# 画像取得URLの署名鍵（開発用の既定値）。
-# 本番では `wrangler secret put PHOTO_URL_SECRET` で上書きすること。
-PHOTO_URL_SECRET = "dev-only-photo-url-secret"
+# 期限が近い食材のメール通知（notificationService）で使う設定。
+# NOTIFY_FROM_EMAIL: 未指定なら Resend の検証不要アドレス onboarding@resend.dev を使う。
+#   自ドメインで送りたい場合は Resend でドメイン検証後にここを差し替える。
+NOTIFY_FROM_EMAIL = "onboarding@resend.dev"
+# NOTIFY_EXPIRING_WITHIN_DAYS: 「期限が近い」とみなす日数（既定3日）。
+NOTIFY_EXPIRING_WITHIN_DAYS = "3"
+
+# ----------------------------------------------------------------------------
+# Cron（期限が近い食材のメール通知を毎日自動実行）
+#   "0 23 * * *" は UTC 23:00 = JST 8:00。src/index.ts の scheduled ハンドラが動く。
+# ----------------------------------------------------------------------------
+[triggers]
+crons = ["0 23 * * *"]
 
 # ----------------------------------------------------------------------------
 # D1（構造化データ）
@@ -28,7 +41,7 @@ PHOTO_URL_SECRET = "dev-only-photo-url-secret"
 [[d1_databases]]
 binding = "DB"
 database_name = "food-loss-db"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "663952c2-4920-414a-8dde-e437d3f26fa9"
 migrations_dir = "migrations"
 
 # ----------------------------------------------------------------------------
