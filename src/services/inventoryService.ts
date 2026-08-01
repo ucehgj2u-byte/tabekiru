@@ -7,9 +7,10 @@ import {
   storageLocations,
   type InventoryLot,
 } from '../db/schema';
-import { nowUtc } from '../lib/datetime';
+import { nowUtc, todayUtc } from '../lib/datetime';
 import { ApiError } from '../lib/errors';
 import { newId } from '../lib/id';
+import { resolveOpenedExpiry } from '../lib/openedShelfLife';
 
 /**
  * 在庫ロットの生成・更新と、inventory_events への追記をまとめる。
@@ -130,7 +131,7 @@ export async function getLotOrThrow(db: Db, lotId: string): Promise<InventoryLot
 export type AppendEventInput = {
   lotId: string;
   householdId: string;
-  eventType: 'created' | 'adjusted' | 'consumed' | 'discarded';
+  eventType: 'created' | 'adjusted' | 'consumed' | 'discarded' | 'opened';
   /** イベントで動いた数量（consumed/discardedは減った量、createdは初期数量） */
   quantity: number;
   actorUserId: string;
@@ -200,6 +201,47 @@ export async function consumeOrDiscard(
     quantity: amount,
     actorUserId,
     note: note ?? null,
+  });
+
+  return await getLotOrThrow(db, lot.id);
+}
+
+/**
+ * 在庫を「開封済み」にする。
+ * カテゴリ別の固定ルールで期限を再計算し（元の期限より延びることはない）、
+ * opened イベントを追記する。既に開封済み・active以外なら弾く。
+ */
+export async function openLot(
+  db: Db,
+  lot: InventoryLot,
+  actorUserId: string,
+): Promise<InventoryLot> {
+  if (lot.status !== 'active') {
+    throw ApiError.conflict(`この在庫は既に ${lot.status} のため開封できません`);
+  }
+  if (lot.openedAt) {
+    throw ApiError.conflict('この在庫は既に開封済みです');
+  }
+
+  const openedOn = todayUtc();
+  const nextExpiresOn = resolveOpenedExpiry(lot.category, openedOn, lot.expiresOn);
+
+  await db
+    .update(inventoryLots)
+    .set({
+      openedAt: openedOn,
+      expiresOn: nextExpiresOn,
+      updatedAt: nowUtc(),
+    })
+    .where(eq(inventoryLots.id, lot.id));
+
+  await appendEvent(db, {
+    lotId: lot.id,
+    householdId: lot.householdId,
+    eventType: 'opened',
+    quantity: lot.quantity,
+    actorUserId,
+    note: `消費期限を ${nextExpiresOn} に更新（開封済み）`,
   });
 
   return await getLotOrThrow(db, lot.id);

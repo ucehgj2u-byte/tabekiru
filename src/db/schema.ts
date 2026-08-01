@@ -104,6 +104,8 @@ export const inventoryLots = sqliteTable(
     locationId: text('location_id').references(() => storageLocations.id),
     purchasedOn: text('purchased_on'),
     expiresOn: text('expires_on').notNull(),
+    /** 開封日。開封していなければ null。開封するとカテゴリ別ルールで expiresOn が短縮される */
+    openedAt: text('opened_at'),
     status: text('status', { enum: ['active', 'consumed', 'discarded'] })
       .notNull()
       .default('active'),
@@ -134,7 +136,7 @@ export const inventoryEvents = sqliteTable(
       .notNull()
       .references(() => households.id),
     eventType: text('event_type', {
-      enum: ['created', 'adjusted', 'consumed', 'discarded'],
+      enum: ['created', 'adjusted', 'consumed', 'discarded', 'opened'],
     }).notNull(),
     quantity: real('quantity').notNull(),
     actorUserId: text('actor_user_id')

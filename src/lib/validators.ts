@@ -177,6 +177,23 @@ export const historyQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
+/**
+ * 「これを作った」で複数の在庫をまとめて消費する場合のボディ。
+ * quantity が残量を超える場合はルート側で残量に丸める（エラーにはしない）。
+ */
+export const recipeConsumeSchema = z.object({
+  recipe_title: z.string().trim().max(200).optional(),
+  items: z
+    .array(
+      z.object({
+        inventory_lot_id: z.string().trim().min(1),
+        quantity: z.number().finite().positive(),
+      }),
+    )
+    .min(1)
+    .max(30),
+});
+
 /* -------------------------------------------------------------------------- */
 /* パースヘルパー                                                              */
 /* -------------------------------------------------------------------------- */

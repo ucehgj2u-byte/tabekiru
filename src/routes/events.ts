@@ -72,6 +72,7 @@ eventsRoute.get('/:id/events', async (c) => {
     adjusted: emptyBucket(),
     consumed: emptyBucket(),
     discarded: emptyBucket(),
+    opened: emptyBucket(),
   };
   for (const row of grouped) {
     summary[row.event_type] = {

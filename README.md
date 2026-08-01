@@ -289,11 +289,19 @@ household配下のリソースには、**そのhouseholdの `active` メンバ�
 | PATCH | `/inventory/:id` | 数量・保存場所などの修正（`adjusted` を記録） |
 | POST | `/inventory/:id/consume` | 消費（`consumed` を記録、0で `status=consumed`） |
 | POST | `/inventory/:id/discard` | 廃棄（`discarded` を記録、食品ロス集計の元データ） |
+| POST | `/inventory/:id/open` | 開封済みにする（`opened` を記録、期限をカテゴリ別ルールで再計算） |
 | GET | `/inventory/:id/events` | このロットの履歴 |
 
 一覧のクエリ: `status`(`active`/`consumed`/`discarded`/`all`)、`category`、`location_id`、
 `expiring_within_days`、`limit`、`offset`。
 各アイテムには `days_until_expiry` と `is_expired` が付きます。
+
+### 開封後の期限
+
+`POST /inventory/:id/open` は AI を呼ばず、[src/lib/openedShelfLife.ts](src/lib/openedShelfLife.ts)
+のカテゴリ別固定ルール（例: 肉=1日、乳製品=3日、調味料=30日）で新しい消費期限を即座に計算します。
+「開封日 + カテゴリ日数」と「元々の消費期限」を比較し、**早い方**を採用するため、開封したことで
+期限が延びることはありません。二重開封や、`active` 以外の在庫への操作は 409 で拒否します。
 
 `category` は次の固定値から選びます（表記ゆれで集計が壊れないよう限定しています）。
 
@@ -316,6 +324,7 @@ household配下のリソースには、**そのhouseholdの `active` メンバ�
 | --- | --- | --- |
 | POST | `/households/:id/recipes/suggestions` | 選んだ食材でレシピ提案（`inventory_lot_ids`必須） |
 | GET | `/households/:id/recipes/history` | これまでの提案履歴（新しい順） |
+| POST | `/households/:id/recipes/consume` | 「これを作った」時に使った食材をまとめて消費 |
 
 `inventory_lot_ids` は1〜30件。**「期限が近い順に自動で選んでレシピ提案する」機能は廃止しています**
 （呼び出すたびにGemini APIのコストが発生するため、ユーザーが明示的に選んだ時だけ呼び出す設計にしています）。
@@ -323,6 +332,13 @@ household配下のリソースには、**そのhouseholdの `active` メンバ�
 提案が成功すると `recipe_suggestions` テーブルに履歴として自動保存され、`GET /recipes/history` で
 `limit`・`offset` 付きで一覧取得できます。各エントリには使った食材(`based_on`)とレシピ本文
 （`missing_ingredients` を含む）がスナップショットとして残ります。
+
+各レシピには `ingredient_amounts`（`{ name, quantity, unit }[]`）として、AIが出した使用量の目安が
+付きます。「これを作った」ボタンでこの目安を確認ダイアログに出し、ユーザーが数量を調整してから
+`POST /recipes/consume` に `{ recipe_title?, items: [{ inventory_lot_id, quantity }] }` を送ると、
+指定した在庫をまとめて消費（`inventory_events` に `consumed` を記録）します。
+残量を超える数量を送っても400にはせず残量まで丸め、一部の食材が消費済み等で失敗しても他の食材の
+消費は続行し、`consumed` / `failed` の内訳を返します。
 
 ---
 

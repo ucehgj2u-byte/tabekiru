@@ -1132,4 +1132,236 @@ describe('recipes 提案', () => {
     );
     expect(status).toBe(400);
   });
+
+  it('ingredient_amounts（自動消費用の数量目安）が含まれる', async () => {
+    const householdId = await createHousehold(TOKEN, '数量目安テスト');
+    const lot = await apiJson(`/households/${householdId}/inventory`, {
+      method: 'POST',
+      body: jsonBody({
+        display_name: 'キャベツ',
+        quantity: 1,
+        unit: '玉',
+        expires_on: dayFromToday(3),
+      }),
+      token: TOKEN,
+    });
+
+    mockGemini([
+      {
+        title: 'キャベツの浅漬け',
+        used_ingredients: ['キャベツ'],
+        steps: ['切る', '塩もみする'],
+        ingredient_amounts: [{ name: 'キャベツ', quantity: 0.25, unit: '玉' }],
+      },
+    ]);
+
+    const { body } = await apiJson(`/households/${householdId}/recipes/suggestions`, {
+      method: 'POST',
+      body: jsonBody({ inventory_lot_ids: [lot.body.inventory_lot.id] }),
+      token: TOKEN,
+    });
+    expect(body.recipes[0].ingredient_amounts).toEqual([
+      { name: 'キャベツ', quantity: 0.25, unit: '玉' },
+    ]);
+  });
+
+  it('ingredient_amountsの不正な要素は捨てられる', async () => {
+    const householdId = await createHousehold(TOKEN, '数量目安不正テスト');
+    const lot = await apiJson(`/households/${householdId}/inventory`, {
+      method: 'POST',
+      body: jsonBody({
+        display_name: 'にんじん',
+        quantity: 1,
+        unit: '本',
+        expires_on: dayFromToday(3),
+      }),
+      token: TOKEN,
+    });
+
+    mockGemini([
+      {
+        title: 'にんじんグラッセ',
+        used_ingredients: ['にんじん'],
+        steps: ['切る', '煮る'],
+        ingredient_amounts: [
+          { name: 'にんじん', quantity: 1, unit: '本' },
+          { name: '謎の食材', quantity: -5, unit: '個' }, // quantity<=0 は捨てる
+          { name: '単位無し' }, // unit欠落は捨てる
+        ],
+      },
+    ]);
+
+    const { body } = await apiJson(`/households/${householdId}/recipes/suggestions`, {
+      method: 'POST',
+      body: jsonBody({ inventory_lot_ids: [lot.body.inventory_lot.id] }),
+      token: TOKEN,
+    });
+    expect(body.recipes[0].ingredient_amounts).toEqual([
+      { name: 'にんじん', quantity: 1, unit: '本' },
+    ]);
+  });
+});
+
+describe('recipes 一括消費（これを作った）', () => {
+  it('選んだ食材をまとめて消費し、consumedイベントが記録される', async () => {
+    const householdId = await createHousehold(TOKEN, '一括消費テスト');
+    const tomato = await apiJson(`/households/${householdId}/inventory`, {
+      method: 'POST',
+      body: jsonBody({
+        display_name: 'トマト', quantity: 3, unit: '個', expires_on: dayFromToday(3),
+      }),
+      token: TOKEN,
+    });
+    const egg = await apiJson(`/households/${householdId}/inventory`, {
+      method: 'POST',
+      body: jsonBody({
+        display_name: '卵', quantity: 6, unit: '個', expires_on: dayFromToday(10),
+      }),
+      token: TOKEN,
+    });
+
+    const { status, body } = await apiJson(
+      `/households/${householdId}/recipes/consume`,
+      {
+        method: 'POST',
+        body: jsonBody({
+          recipe_title: 'トマトと卵の炒め物',
+          items: [
+            { inventory_lot_id: tomato.body.inventory_lot.id, quantity: 2 },
+            { inventory_lot_id: egg.body.inventory_lot.id, quantity: 2 },
+          ],
+        }),
+        token: TOKEN,
+      },
+    );
+    expect(status).toBe(200);
+    expect(body.consumed).toHaveLength(2);
+    expect(body.failed).toHaveLength(0);
+
+    const list = await apiJson(`/households/${householdId}/inventory`, { token: TOKEN });
+    const t = list.body.items.find((i: any) => i.display_name === 'トマト');
+    const e = list.body.items.find((i: any) => i.display_name === '卵');
+    expect(t.quantity).toBe(1);
+    expect(e.quantity).toBe(4);
+
+    const events = await apiJson(`/inventory/${tomato.body.inventory_lot.id}/events`, {
+      token: TOKEN,
+    });
+    expect(events.body.events.at(-1).event_type).toBe('consumed');
+    expect(events.body.events.at(-1).note).toContain('トマトと卵の炒め物');
+  });
+
+  it('残量を超える数量を指定しても、エラーにせず残量までに丸める', async () => {
+    const householdId = await createHousehold(TOKEN, '丸め消費テスト');
+    const lot = await apiJson(`/households/${householdId}/inventory`, {
+      method: 'POST',
+      body: jsonBody({
+        display_name: '豚肉', quantity: 300, unit: 'g', expires_on: dayFromToday(3),
+      }),
+      token: TOKEN,
+    });
+
+    const { status, body } = await apiJson(
+      `/households/${householdId}/recipes/consume`,
+      {
+        method: 'POST',
+        body: jsonBody({
+          items: [{ inventory_lot_id: lot.body.inventory_lot.id, quantity: 999 }],
+        }),
+        token: TOKEN,
+      },
+    );
+    expect(status).toBe(200);
+    expect(body.consumed[0].quantity).toBe(300);
+
+    const updated = await apiJson(`/inventory/${lot.body.inventory_lot.id}`, {
+      token: TOKEN,
+    });
+    expect(updated.body.inventory_lot.quantity).toBe(0);
+    expect(updated.body.inventory_lot.status).toBe('consumed');
+  });
+
+  it('一部の食材が失敗しても、他の食材は消費される', async () => {
+    const householdId = await createHousehold(TOKEN, '部分失敗消費テスト');
+    const ok = await apiJson(`/households/${householdId}/inventory`, {
+      method: 'POST',
+      body: jsonBody({
+        display_name: '玉ねぎ', quantity: 2, unit: '個', expires_on: dayFromToday(5),
+      }),
+      token: TOKEN,
+    });
+    const alreadyConsumed = await apiJson(`/households/${householdId}/inventory`, {
+      method: 'POST',
+      body: jsonBody({
+        display_name: 'じゃがいも', quantity: 1, unit: '個', expires_on: dayFromToday(5),
+      }),
+      token: TOKEN,
+    });
+    await apiJson(`/inventory/${alreadyConsumed.body.inventory_lot.id}/consume`, {
+      method: 'POST',
+      body: jsonBody({}),
+      token: TOKEN,
+    });
+
+    const { status, body } = await apiJson(
+      `/households/${householdId}/recipes/consume`,
+      {
+        method: 'POST',
+        body: jsonBody({
+          items: [
+            { inventory_lot_id: ok.body.inventory_lot.id, quantity: 1 },
+            { inventory_lot_id: alreadyConsumed.body.inventory_lot.id, quantity: 1 },
+            { inventory_lot_id: 'lot_does_not_exist', quantity: 1 },
+          ],
+        }),
+        token: TOKEN,
+      },
+    );
+    expect(status).toBe(200);
+    expect(body.consumed).toHaveLength(1);
+    expect(body.consumed[0].display_name).toBe('玉ねぎ');
+    expect(body.failed).toHaveLength(2);
+  });
+
+  it('他householdの在庫は消費できない', async () => {
+    const householdId = await createHousehold(TOKEN, '一括消費自分の家');
+    const otherHouseholdId = await createHousehold('other-consume-user', '他人の家2');
+    const theirs = await apiJson(`/households/${otherHouseholdId}/inventory`, {
+      method: 'POST',
+      body: jsonBody({
+        display_name: '大根', quantity: 1, unit: '本', expires_on: dayFromToday(5),
+      }),
+      token: 'other-consume-user',
+    });
+
+    const { body } = await apiJson(`/households/${householdId}/recipes/consume`, {
+      method: 'POST',
+      body: jsonBody({
+        items: [{ inventory_lot_id: theirs.body.inventory_lot.id, quantity: 1 }],
+      }),
+      token: TOKEN,
+    });
+    expect(body.consumed).toHaveLength(0);
+    expect(body.failed).toHaveLength(1);
+  });
+
+  it('itemsが空配列だと400', async () => {
+    const householdId = await createHousehold(TOKEN, '一括消費空配列');
+    const { status } = await apiJson(`/households/${householdId}/recipes/consume`, {
+      method: 'POST',
+      body: jsonBody({ items: [] }),
+      token: TOKEN,
+    });
+    expect(status).toBe(400);
+  });
+
+  it('メンバーでないユーザーは403', async () => {
+    const householdId = await createHousehold(TOKEN, '一括消費403');
+    const { status } = await apiJson(`/households/${householdId}/recipes/consume`, {
+      method: 'POST',
+      body: jsonBody({ items: [{ inventory_lot_id: 'lot_x', quantity: 1 }] }),
+      token: 'outsider-consume',
+    });
+    expect(status).toBe(403);
+  });
 });

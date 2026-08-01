@@ -13,12 +13,25 @@ export type RecipeInputItem = {
   unit?: string;
 };
 
+/** used_ingredients のうち1品について、実際に使う分量の目安。 */
+export type IngredientAmount = {
+  name: string;
+  quantity: number;
+  unit: string;
+};
+
 export type Recipe = {
   title: string;
   used_ingredients: string[];
   steps: string[];
   /** リストに無い、買い足すとよい食材（調味料等の一般的な常備品は含めない） */
   missing_ingredients: string[];
+  /**
+   * used_ingredients の各食材について実際に使う分量の目安。
+   * 「これを作った」時の在庫消費（自動消費）で、確認ダイアログの初期値として使う。
+   * AIの目安なので誤差はあり得る前提で、UI側で数量を編集できるようにする。
+   */
+  ingredient_amounts: IngredientAmount[];
 };
 
 const RESPONSE_SCHEMA: GeminiSchema = {
@@ -30,6 +43,18 @@ const RESPONSE_SCHEMA: GeminiSchema = {
       used_ingredients: { type: 'ARRAY', items: { type: 'STRING' } },
       steps: { type: 'ARRAY', items: { type: 'STRING' } },
       missing_ingredients: { type: 'ARRAY', items: { type: 'STRING' } },
+      ingredient_amounts: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            name: { type: 'STRING' },
+            quantity: { type: 'NUMBER' },
+            unit: { type: 'STRING' },
+          },
+          required: ['name', 'quantity', 'unit'],
+        },
+      },
     },
     required: ['title', 'used_ingredients', 'steps'],
   },
@@ -65,6 +90,12 @@ function buildPrompt(items: RecipeInputItem[]): string {
     'missing_ingredients には、リストに無いが買い足すとより美味しく/完成度高く作れる食材を',
     '2〜4個挙げてください（塩・こしょう・油・醤油などどの家庭にもある調味料は含めないこと）。',
     '買い足す必要が無いレシピの場合は空配列にしてください。',
+    'ingredient_amounts には、used_ingredients に入れた食材それぞれについて、',
+    'このレシピで実際に使う分量の目安を { name, quantity, unit } で入れてください。',
+    'name は used_ingredients と同じ表記にし、unit は食材リストに書かれている単位に',
+    'できるだけ合わせてください（例: 食材リストで「2本」なら本単位で答える）。',
+    '在庫をすべて使い切るとは限らないので、レシピとして自然な分量を答えてください',
+    '（例: キャベツ1玉のうち1/4だけ使うなら quantity は 0.25、unit は 玉）。',
     '',
     `食材リスト: ${formatIngredientList(items)}`,
   ].join('\n');
@@ -113,6 +144,7 @@ function sanitizeRecipes(data: unknown): Recipe[] {
       used_ingredients: toStringArray(item.used_ingredients),
       steps: toStringArray(item.steps),
       missing_ingredients: toStringArray(item.missing_ingredients),
+      ingredient_amounts: toIngredientAmounts(item.ingredient_amounts),
     });
   }
   return recipes;
@@ -124,4 +156,19 @@ function toStringArray(value: unknown): string[] {
     .filter((v): v is string => typeof v === 'string')
     .map((v) => v.trim())
     .filter(Boolean);
+}
+
+function toIngredientAmounts(value: unknown): IngredientAmount[] {
+  if (!Array.isArray(value)) return [];
+  const result: IngredientAmount[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue;
+    const item = raw as Record<string, unknown>;
+    const name = typeof item.name === 'string' ? item.name.trim() : '';
+    const quantity = typeof item.quantity === 'number' ? item.quantity : NaN;
+    const unit = typeof item.unit === 'string' ? item.unit.trim() : '';
+    if (!name || !unit || !Number.isFinite(quantity) || quantity <= 0) continue;
+    result.push({ name, quantity, unit });
+  }
+  return result;
 }

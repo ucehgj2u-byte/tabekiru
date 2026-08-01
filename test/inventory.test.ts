@@ -335,6 +335,92 @@ describe('inventory 更新・消費・廃棄', () => {
   });
 });
 
+describe('開封', () => {
+  let householdId: string;
+
+  beforeEach(async () => {
+    ({ householdId } = await setup());
+  });
+
+  it('開封するとカテゴリ別ルールで期限が短縮される', async () => {
+    const lot = await addLot(householdId, {
+      category: '野菜',
+      expires_on: dayFromToday(20),
+    });
+
+    const { status, body } = await apiJson(`/inventory/${lot.id}/open`, {
+      method: 'POST',
+      token: TOKEN,
+    });
+    expect(status).toBe(200);
+    expect(body.inventory_lot.opened_at).toBe(dayFromToday(0));
+    // 野菜は開封後3日ルール
+    expect(body.inventory_lot.expires_on).toBe(dayFromToday(3));
+
+    const events = await apiJson(`/inventory/${lot.id}/events`, { token: TOKEN });
+    expect(events.body.events.at(-1).event_type).toBe('opened');
+  });
+
+  it('元の期限が開封後ルールより早ければ、期限は延びない', async () => {
+    const lot = await addLot(householdId, {
+      category: '調味料', // 開封後30日ルール
+      expires_on: dayFromToday(2),
+    });
+
+    const { body } = await apiJson(`/inventory/${lot.id}/open`, {
+      method: 'POST',
+      token: TOKEN,
+    });
+    // 30日ルールより元の期限(2日後)の方が早いので、そのまま
+    expect(body.inventory_lot.expires_on).toBe(dayFromToday(2));
+  });
+
+  it('カテゴリ未設定なら既定の3日ルールが適用される', async () => {
+    const lot = await addLot(householdId, { expires_on: dayFromToday(20) });
+    const { body } = await apiJson(`/inventory/${lot.id}/open`, {
+      method: 'POST',
+      token: TOKEN,
+    });
+    expect(body.inventory_lot.expires_on).toBe(dayFromToday(3));
+  });
+
+  it('既に開封済みのものは再度開封できない', async () => {
+    const lot = await addLot(householdId, { expires_on: dayFromToday(20) });
+    await apiJson(`/inventory/${lot.id}/open`, { method: 'POST', token: TOKEN });
+
+    const { status } = await apiJson(`/inventory/${lot.id}/open`, {
+      method: 'POST',
+      token: TOKEN,
+    });
+    expect(status).toBe(409);
+  });
+
+  it('消費済みの在庫は開封できない', async () => {
+    const lot = await addLot(householdId);
+    await apiJson(`/inventory/${lot.id}/consume`, {
+      method: 'POST',
+      body: jsonBody({}),
+      token: TOKEN,
+    });
+
+    const { status } = await apiJson(`/inventory/${lot.id}/open`, {
+      method: 'POST',
+      token: TOKEN,
+    });
+    expect(status).toBe(409);
+  });
+
+  it('在庫一覧にも開封状態(opened_at)が反映される', async () => {
+    const lot = await addLot(householdId, { expires_on: dayFromToday(20) });
+    await apiJson(`/inventory/${lot.id}/open`, { method: 'POST', token: TOKEN });
+
+    const list = await apiJson(`/households/${householdId}/inventory`, {
+      token: TOKEN,
+    });
+    expect(list.body.items[0].opened_at).toBe(dayFromToday(0));
+  });
+});
+
 describe('events 履歴', () => {
   it('履歴一覧と集計を返す', async () => {
     const { householdId } = await setup();

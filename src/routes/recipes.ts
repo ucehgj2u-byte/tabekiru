@@ -16,8 +16,10 @@ import {
   historyQuerySchema,
   parseJsonBody,
   parseQuery,
+  recipeConsumeSchema,
   recipeSuggestSchema,
 } from '../lib/validators';
+import { consumeOrDiscard } from '../services/inventoryService';
 import { suggestRecipes } from '../services/recipeService';
 import type { AppEnv } from '../types';
 
@@ -124,6 +126,84 @@ recipesRoute.post('/:id/recipes/suggestions', async (c) => {
     c.env, db, user, householdId, lots, today,
   );
   return c.json(responseBody);
+});
+
+/**
+ * POST /households/:id/recipes/consume
+ * 「これを作った」時に、そのレシピで使った食材をまとめて消費する。
+ * 各食材の数量はAIが出した目安をUI側で確認・編集したもの。
+ * 残量を超える数量が来ても400にはせず、残量までに丸めて消費する
+ * （提案から確定までの間に他の操作で残量が減っている可能性があるため）。
+ * 一部の食材が既に消費済み等で失敗しても、他の食材の消費は続行する。
+ */
+recipesRoute.post('/:id/recipes/consume', async (c) => {
+  const db = c.get('db');
+  const user = c.get('user');
+  const householdId = c.req.param('id');
+  await assertHouseholdAccess(db, householdId, user.id);
+
+  const body = await parseJsonBody(c, recipeConsumeSchema);
+  const note = body.recipe_title
+    ? `レシピ「${body.recipe_title}」で使用`
+    : 'レシピで使用';
+
+  const consumed: Array<{
+    inventory_lot_id: string;
+    display_name: string;
+    quantity: number;
+    status: string;
+  }> = [];
+  const failed: Array<{ inventory_lot_id: string; error: string }> = [];
+
+  for (const item of body.items) {
+    const rows = await db
+      .select()
+      .from(inventoryLots)
+      .where(
+        and(
+          eq(inventoryLots.id, item.inventory_lot_id),
+          eq(inventoryLots.householdId, householdId),
+        ),
+      )
+      .limit(1);
+
+    if (rows.length === 0) {
+      failed.push({
+        inventory_lot_id: item.inventory_lot_id,
+        error: 'この家庭の在庫として見つかりませんでした',
+      });
+      continue;
+    }
+
+    const lot = rows[0];
+    if (lot.status !== 'active') {
+      failed.push({
+        inventory_lot_id: item.inventory_lot_id,
+        error: `既に ${lot.status} のため消費できません`,
+      });
+      continue;
+    }
+
+    // 残量を超える指定は、エラーにせず残量までに丸める
+    const amount = Math.min(item.quantity, lot.quantity);
+
+    try {
+      const updated = await consumeOrDiscard(db, lot, user.id, 'consumed', amount, note);
+      consumed.push({
+        inventory_lot_id: updated.id,
+        display_name: updated.displayName,
+        quantity: amount,
+        status: updated.status,
+      });
+    } catch (e) {
+      failed.push({
+        inventory_lot_id: item.inventory_lot_id,
+        error: e instanceof ApiError ? e.message : '消費処理に失敗しました',
+      });
+    }
+  }
+
+  return c.json({ consumed, failed });
 });
 
 /**

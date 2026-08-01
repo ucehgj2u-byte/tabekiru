@@ -19,6 +19,7 @@ import {
   consumeOrDiscard,
   createLot,
   getLotOrThrow,
+  openLot,
   roundQuantity,
 } from '../services/inventoryService';
 import { createSignedPhotoPath, photoSecret } from '../services/r2Service';
@@ -201,6 +202,19 @@ inventoryRoute.post('/:id/consume', async (c) => {
     body.quantity,
     body.note,
   );
+  return c.json({ inventory_lot: updated });
+});
+
+/**
+ * POST /inventory/:id/open — 開封済みにする。
+ * カテゴリ別の固定ルールで消費期限を再計算する（元の期限より延びることはない）。
+ */
+inventoryRoute.post('/:id/open', async (c) => {
+  const db = c.get('db');
+  const user = c.get('user');
+  const lot = await loadLotForUser(db, c.req.param('id'), user.id);
+
+  const updated = await openLot(db, lot, user.id);
   return c.json({ inventory_lot: updated });
 });
 

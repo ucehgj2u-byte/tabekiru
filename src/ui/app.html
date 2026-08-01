@@ -528,6 +528,21 @@ button { color: inherit; }
   background: rgba(217, 131, 36, .1); color: #8a5a1c; font-size: 11px;
 }
 
+/* 「これを作った」ボタンと確認ダイアログ */
+.cooked-btn {
+  margin-top: 10px; width: 100%; min-height: 38px; border: 0; border-radius: 999px;
+  background: var(--leaf); color: white; font-weight: 800; font-size: 12px; cursor: pointer;
+}
+.cooked-btn:hover { filter: brightness(1.08); }
+.cook-confirm-item {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 12px; background: white;
+  font-size: 12px; margin-bottom: 6px;
+}
+.cook-confirm-item span { flex: 1; font-weight: 700; }
+.cook-confirm-item .cook-qty { width: 64px; padding: 5px 6px; border: 1px solid var(--line); border-radius: 8px; }
+.cook-confirm-item small { color: var(--muted); font-size: 10px; white-space: nowrap; }
+
 /* レシピ提案履歴 */
 .history-entry { margin-bottom: 18px; }
 .history-entry:last-child { margin-bottom: 0; }
@@ -1367,11 +1382,13 @@ function openDetail(id) {
     '<p style="margin:0;color:var(--muted);font-size:12px">' +
     '残り ' + item.quantity + esc(item.unit) + '・期限 ' + esc(item.expires_on) +
     (item.purchased_on ? '・購入 ' + esc(item.purchased_on) : '') +
-    (item.source === 'scan' ? '・写真から登録' : '') + '</p></div>' +
+    (item.source === 'scan' ? '・写真から登録' : '') +
+    (item.opened_at ? '・📦 ' + esc(item.opened_at) + 'に開封済み' : '') + '</p></div>' +
     '<div class="modal-actions">' +
     '<button class="consume-button" id="dConsume">✓ 食べきった</button>' +
     '<button class="discard-button" id="dDiscard">捨てる</button>' +
     '<button id="dPartial">量を指定して消費</button>' +
+    (item.opened_at ? '' : '<button id="dOpen">📦 開封した</button>') +
     '<button id="dRecipe">この食材でレシピ</button>' +
     '</div></section>',
     {
@@ -1380,9 +1397,25 @@ function openDetail(id) {
         backdrop.querySelector('#dDiscard').onclick = function () { changeLot(item, 'discard'); };
         backdrop.querySelector('#dPartial').onclick = function () { changeLot(item, 'consume', true); };
         backdrop.querySelector('#dRecipe').onclick = function () { openRecipes([item.id]); };
+        const openBtn = backdrop.querySelector('#dOpen');
+        if (openBtn) openBtn.onclick = function () { openLotAction(item); };
       },
     }
   );
+}
+
+/** 在庫を開封済みにする（カテゴリ別ルールで期限を短縮）。 */
+async function openLotAction(item) {
+  try {
+    const d = await api('/inventory/' + item.id + '/open', { method: 'POST' });
+    toast(
+      item.display_name + 'を開封済みにしました（期限: ' + d.inventory_lot.expires_on + '）',
+    );
+    await refreshAll();
+    openDetail(item.id);
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 /** 消費・廃棄。askQuantity が true のときだけ数量を尋ねる。 */
@@ -1468,6 +1501,7 @@ async function openRecipes(ids) {
     }
     lead.textContent = '選んだ ' + d.based_on.length + ' 品から、' + d.model_name + ' が提案しました。';
     list.innerHTML = renderRecipeArticles(d.recipes);
+    wireCookButtons(list, d.recipes, d.based_on);
 
     // 選んでレシピを取得したら、在庫一覧側の選択状態はクリアする（見た目も戻す）
     state.selected.clear();
@@ -1513,13 +1547,112 @@ function renderRecipePicker(checkedIds) {
 function renderRecipeArticles(recipes) {
   return recipes.map(function (r, i) {
     const missing = (r.missing_ingredients || []).filter(Boolean);
+    const canCook = (r.ingredient_amounts || []).length > 0;
     return '<article><span>0' + (i + 1) + '</span><div>' +
       '<h3>' + esc(r.title) + '</h3>' +
       '<p>' + (r.used_ingredients.length ? esc(r.used_ingredients.join('・')) + 'が使えます' : '定番食材で作れます') + '</p>' +
       (missing.length ? '<p class="missing-line">🛒 買い足すと良いもの: ' + esc(missing.join('・')) + '</p>' : '') +
       '<ol>' + r.steps.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ol>' +
+      (canCook
+        ? '<button type="button" class="cooked-btn" data-ri="' + i + '">🍳 これを作った</button>'
+        : '') +
       '</div></article>';
   }).join('');
+}
+
+/**
+ * renderRecipeArticles で描画した「これを作った」ボタンにイベントを結線する。
+ * basedOn（提案時に使った在庫のスナップショット）と recipes を突き合わせて
+ * 確認ダイアログを開けるようにする。
+ */
+function wireCookButtons(container, recipes, basedOn) {
+  container.querySelectorAll('.cooked-btn').forEach(function (btn) {
+    const idx = Number(btn.getAttribute('data-ri'));
+    btn.onclick = function () { openCookConfirm(recipes[idx], basedOn); };
+  });
+}
+
+/**
+ * 「これを作った」の確認ダイアログを開く。
+ * レシピの ingredient_amounts（AIが出した使用量の目安）と、提案時に使った在庫
+ * (basedOn) を食材名で突き合わせ、数量を編集可能な状態で一覧表示する。
+ */
+function openCookConfirm(recipe, basedOn) {
+  const lotByName = {};
+  (basedOn || []).forEach(function (b) { lotByName[b.display_name] = b; });
+
+  const matched = (recipe.ingredient_amounts || [])
+    .map(function (ia) {
+      const lot = lotByName[ia.name];
+      if (!lot || lot.quantity <= 0) return null;
+      return {
+        inventory_lot_id: lot.inventory_lot_id,
+        display_name: lot.display_name,
+        unit: lot.unit,
+        maxQuantity: lot.quantity,
+        suggestedQuantity: Math.min(ia.quantity, lot.quantity),
+      };
+    })
+    .filter(Boolean);
+
+  if (!matched.length) {
+    toast('在庫と一致する食材が見つかりませんでした。手動で消費を記録してください', true);
+    return;
+  }
+
+  openModal(
+    '<section class="add-modal" role="dialog" aria-modal="true">' +
+    '<button class="modal-close" aria-label="閉じる">×</button>' +
+    '<div class="add-heading"><span class="eyebrow">COOKED</span>' +
+    '<h2>' + esc(recipe.title) + 'を作った</h2>' +
+    '<p>使った分だけ在庫から減らします。AIの目安なので数量は調整できます。</p></div>' +
+    '<div class="recipe-picker-list" id="cookConfirmList">' +
+    matched.map(function (m, i) {
+      return '<div class="cook-confirm-item" data-idx="' + i + '">' +
+        '<span>' + esc(m.display_name) + '</span>' +
+        '<input type="number" class="cook-qty" min="0" max="' + m.maxQuantity +
+        '" step="0.1" value="' + m.suggestedQuantity + '">' +
+        '<small>' + esc(m.unit) + '（残り' + m.maxQuantity + '）</small>' +
+        '</div>';
+    }).join('') +
+    '</div>' +
+    '<button type="button" class="recipe-picker-go" id="cookConfirmGo">確定して在庫を減らす</button>' +
+    '</section>',
+    { onOpen: function (backdrop) {
+        backdrop.querySelector('#cookConfirmGo').onclick = function () {
+          confirmCooked(matched, recipe.title);
+        };
+      } }
+  );
+}
+
+/** 確認ダイアログの入力値を集めて一括消費APIを呼ぶ。 */
+async function confirmCooked(matched, title) {
+  const rows = document.querySelectorAll('#cookConfirmList .cook-confirm-item');
+  const items = [];
+  rows.forEach(function (el) {
+    const idx = Number(el.getAttribute('data-idx'));
+    const qty = Number(el.querySelector('.cook-qty').value);
+    if (qty > 0) items.push({ inventory_lot_id: matched[idx].inventory_lot_id, quantity: qty });
+  });
+  if (!items.length) { toast('数量を1つ以上入力してください', true); return; }
+
+  try {
+    const d = await api('/households/' + state.household + '/recipes/consume', {
+      method: 'POST',
+      json: { recipe_title: title, items: items },
+    });
+    closeModal();
+    if (d.consumed.length) {
+      toast(d.consumed.map(function (c) { return c.display_name; }).join('・') + 'を在庫から減らしました');
+    }
+    if (d.failed.length) {
+      toast(d.failed.length + '品は減らせませんでした（既に消費済みの可能性があります）', true);
+    }
+    await refreshAll();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 /** レシピモーダルを「これまでの提案」タブに切り替える。 */
@@ -1546,14 +1679,20 @@ async function openRecipeHistory() {
       return;
     }
     lead.textContent = d.history.length + '件の提案履歴です。';
-    list.innerHTML = d.history.map(function (h) {
+    list.innerHTML = d.history.map(function (h, hi) {
       const modeLabel = h.selection_mode === 'selected' ? '選んだ食材から' : '期限が近い食材から';
       const names = h.based_on.map(function (b) { return b.display_name; }).join('・');
-      return '<div class="history-entry">' +
+      return '<div class="history-entry" data-hi="' + hi + '">' +
         '<div class="history-entry-head">' +
         '<span>' + esc(h.created_at) + '・' + esc(modeLabel) + '（' + esc(names) + '）</span>' +
         '</div>' + renderRecipeArticles(h.recipes) + '</div>';
     }).join('');
+
+    // 履歴は各エントリごとに使った在庫(based_on)が異なるため、エントリ単位で結線する
+    list.querySelectorAll('.history-entry').forEach(function (entryEl) {
+      const hi = Number(entryEl.getAttribute('data-hi'));
+      wireCookButtons(entryEl, d.history[hi].recipes, d.history[hi].based_on);
+    });
   } catch (e) {
     lead.textContent = e.message;
   }
